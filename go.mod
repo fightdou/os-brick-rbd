@@ -1,3 +1,3 @@
-module github.com/os-brick-rbd
+module github.com/fightdou/os-brick-rbd
 
 go 1.17
