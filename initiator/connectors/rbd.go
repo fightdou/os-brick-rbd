@@ -3,7 +3,7 @@ package connectors
 import (
 	"encoding/json"
 	"fmt"
-	osBrick "github.com/os-brick-rbd"
+	osBrick "github.com/fightdou/os-brick-rbd"
 	"io/ioutil"
 	"log"
 	"os"
