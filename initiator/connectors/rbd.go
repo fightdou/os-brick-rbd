@@ -16,18 +16,13 @@ func ConnectVolume(connectionProperties map[string]interface{}) (map[string]stri
 	result := map[string]string{}
 	localAttach := connectionProperties["do_local_attach"]
 	if IsBool(localAttach) {
-		result, err = localAttachVolume(connectionProperties)
+		result, err = localAttachVolume(connectionProperties["data"])
 		if err != nil {
 			return nil, err
 		}
 		return result, nil
 	}
 	return result, nil
-	//rbdHandler, err := getRbdHandle(connectionProperties)
-	//if err != nil {
-	//	return nil, err
-	//}
-	//return rbdHandler, nil
 }
 
 func DisConnectVolume(connectionProperties map[string]interface{}, deviceInfo map[string]string) {
@@ -132,7 +127,7 @@ func localAttachVolume(connectionProperties map[string]interface{}) (map[string]
 		log.Printf("ceph-common package is not installed")
 		return nil, err
 	}
-	volumeInfo := IsString(connectionProperties["Name"])
+	volumeInfo := IsString(connectionProperties["name"])
 	volume := strings.Split(volumeInfo, "/")
 	poolName := volume[0]
 	poolVolume := volume[1]
@@ -142,7 +137,11 @@ func localAttachVolume(connectionProperties map[string]interface{}) (map[string]
 	_, err = os.Readlink(rbdDevPath)
 	if err != nil {
 		cmd := []string{"map", poolVolume, "--pool", poolName, "--id", IsString(user),
-			"--mon_host", monHosts, "--conf", conf}
+			"--mon_host", monHosts}
+		if conf != "" {
+			cmd = append(cmd, "--conf")
+			cmd = append(cmd, conf)
+		}
 		result, err := osBrick.Execute("rbd", cmd...)
 		if err != nil {
 
@@ -163,22 +162,24 @@ func localAttachVolume(connectionProperties map[string]interface{}) (map[string]
 }
 
 func createNonOpenstackConfig(connectionProperties map[string]interface{}) (string,string) {
-	keyring := connectionProperties["keyring"]
-	if keyring != nil {
-		return "", ""
-	}
-	user := connectionProperties["auth_username"]
 	monitorIps := connectionProperties["hosts"]
 	monitorPorts := connectionProperties["ports"]
-	keyring = connectionProperties["keyring"]
+
 	monHost := generateMonitorHost(monitorIps, monitorPorts)
+	keyring := connectionProperties["keyring"]
+	if keyring == nil {
+		return "", monHost
+	}
+
+	user := connectionProperties["auth_username"]
+
 	keyFile, err := rootCreateCephKeyring(keyring, user)
 	if err != nil {
-		return "", ""
+		return "", monHost
 	}
 	conf, err := rootCreateCephConf(keyFile, monHost, user)
 	if err != nil {
-		return "", ""
+		return "", monHost
 	}
 	return conf, monHost
 }
@@ -262,21 +263,4 @@ func getRbdDeviceName(pool string, volume string) string {
 	return fmt.Sprintf("/dev/rbd/%s/%s", pool, volume)
 }
 
-//func getRbdHandle(connectionProperties map[string]interface{}) (map[string]string, error) {
-//	volumeInfo := IsString(connectionProperties)
-//	volume := strings.Split(volumeInfo, "/")
-//	poolName := volume[0]
-//	poolVolume := volume[1]
-//	user := connectionProperties["auth_username"]
-//	monitorIps := connectionProperties["hosts"]
-//	monitorPorts := connectionProperties["ports"]
-//	monHost := generateMonitorHost(monitorIps, monitorPorts)
-//	keyring := connectionProperties["keyring"]
-//	keyFile, err := rootCreateCephKeyring(keyring, user)
-//	if err != nil {
-//		return nil, err
-//	}
-//	conf, err := rootCreateCephConf(keyFile, monHost, user)
-//
-//}
 
