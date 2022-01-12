@@ -1,7 +1,7 @@
 package initiator
 
 import (
-	"github.com/test/os-brick-rbd/initiator/connectors/rbd"
+	"github.com/fightdou/os-brick-rbd/initiator/connectors/rbd"
 	"strings"
 )
 

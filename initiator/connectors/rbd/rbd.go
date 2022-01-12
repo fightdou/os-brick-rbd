@@ -4,8 +4,8 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
-	osBrick "github.com/test/os-brick-rbd"
-	"github.com/test/os-brick-rbd/initiator"
+	osBrick "github.com/fightdou/os-brick-rbd"
+	"github.com/fightdou/os-brick-rbd/initiator"
 	"io/ioutil"
 	"log"
 	"os"
@@ -61,7 +61,7 @@ func getRbdHandle(data map[string]interface{}) map[string]interface{} {
 	monitorIps := IsStringList(data["hosts"])
 	monitorPorts := IsStringList(data["ports"])
 	keyring := IsString(data["keyring"])
-	conf := createCephConf(monitorIps, monitorPorts, clusterName, user, keyring)
+	conf, _ := createCephConf(monitorIps, monitorPorts, clusterName, user, keyring)
 	rbdClient, err := initiator.NewRBDClient(user, poolName, conf, clusterName)
 	if err != nil {
 		return nil
@@ -73,9 +73,59 @@ func getRbdHandle(data map[string]interface{}) map[string]interface{} {
 	return result
 }
 
-func createCephConf(monIP []string, monPort []string, clName string, user string, keyring string) string {
+func createCephConf(monIP []string, monPort []string, clName string, user string, keyring string) (string,error) {
+	var monitors []string
+	for i, _ := range monIPs {
+		host := fmt.Sprintf("%s:%s", monIP[i], monPort[i])
+		monitors = append(monitors, host)
+	}
+	monitors = strings.Join(monitors, ",")
+	monitors = fmt.Sprintf("mon_host = %s", monitors)
+	userKeyring := checkOrGetKeyringContents(keyring, clName, user)
+
+	data := "[global]"
+	data = data + "\n" + monitors + "\n" + fmt.Sprintf("[client.%s]", IsString(user)) + "\n" +
+		fmt.Sprintf("keyring = %s", userKeyring)
+
+	tmpfile, err := ioutil.TempFile("/tmp", "keyfile-")
+	if err != nil {
+		return "", fmt.Errorf("error creating a temporary keyfile: %w", err)
+	}
+	defer func() {
+		if err != nil {
+			// don't complain about unhandled error
+			_ = os.Remove(tmpfile.Name())
+		}
+	}()
+
+	_, err = tmpfile.WriteString(data)
+	if err != nil {
+		return "", fmt.Errorf("failed to write temporary file: %w", err)
+	}
+	tmpfile.Close()
+	return file.Name(), nil
+}
+
+func checkOrGetKeyringContents(keyring string, clusterName string, user string) string {
+	if keyring == "" {
+		if user != "" {
+			keyring_path := fmt.Sprintf("/etc/ceph/%s.client.%s.keyring", clusterName, user)
+			rp, err := os.Open(keyring_path)
+			if err != nil {
+				return ""
+			}
+			defer fp.Close()
+			r := bufio.NewReader(rp)
+			userKeyring, err := r.ReadBytes(4096)
+			if err != nil {
+				return ""
+			}
+			return userKeyring
+		}
+	}
 	return ""
 }
+
 func checkVailDevice(path string) bool {
 	rp, err := os.Open(path)
 	if err != nil {
@@ -113,7 +163,7 @@ func (c *ConnRbd) ConnectVolume() (map[string]string, error) {
 		}
 		return result, nil
 	}
-	getRbdHandle(data)
+	result = getRbdHandle(data)
 	return result, nil
 }
 
