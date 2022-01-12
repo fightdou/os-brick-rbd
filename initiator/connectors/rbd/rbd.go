@@ -1,41 +1,133 @@
 package rbd
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
-	osBrick "github.com/fightdou/os-brick-rbd"
+	osBrick "github.com/test/os-brick-rbd"
+	"github.com/test/os-brick-rbd/initiator"
 	"io/ioutil"
 	"log"
 	"os"
+	"path"
 	"strconv"
 	"strings"
 )
 
-func ConnectVolume(connectionProperties map[string]interface{}) (map[string]string, error) {
+type ConnRbd struct {
+	ConnectionProperties map[string]interface{}
+}
+
+func (c *ConnRbd) GetVolumePaths() []interface{} {
+	return nil
+}
+
+func (c *ConnRbd) GetSearchPath() interface{} {
+	return nil
+}
+
+func (c *ConnRbd) GetALLAvailableVolumes() interface{} {
+	return nil
+}
+
+func (c *ConnRbd) CheckIOHandlerValid() error {
+	return nil
+}
+
+func (c *ConnRbd) CheckVailDevice(path interface{}, rootAccess bool) bool {
+	if path == nil {
+		return false
+	}
+	switch path.(type) {
+	case string:
+		if rootAccess {
+			res := checkVailDevice(path.(string))
+			return res
+		}
+	default:
+		return false
+	}
+	return true
+}
+
+func getRbdHandle(data map[string]interface{}) map[string]interface{} {
+	result := map[string]interface{}{}
+	user := IsString(data["auth_username"])
+	volumeInfo := IsString(data["name"])
+	volume := strings.Split(volumeInfo, "/")
+	poolName := volume[0]
+	poolVolume := volume[1]
+	clusterName := IsString(data["cluster_name"])
+	monitorIps := IsStringList(data["hosts"])
+	monitorPorts := IsStringList(data["ports"])
+	keyring := IsString(data["keyring"])
+	conf := createCephConf(monitorIps, monitorPorts, clusterName, user, keyring)
+	rbdClient, err := initiator.NewRBDClient(user, poolName, conf, clusterName)
+	if err != nil {
+		return nil
+	}
+	image := initiator.RBDVolume(rbdClient, poolVolume)
+	metadata := initiator.NewRBDImageMetadata(image, poolName, user, conf)
+	ioWrapper := initiator.NewRBDVolumeIOWrapper(metadata)
+	result["path"] = ioWrapper
+	return result
+}
+
+func createCephConf(monIP []string, monPort []string, clName string, user string, keyring string) string {
+	return ""
+}
+func checkVailDevice(path string) bool {
+	rp, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	defer rp.Close()
+	r := bufio.NewReader(rp)
+	_, err = r.ReadBytes(4096)
+	if err != nil {
+		return false
+	}
+	return true
+}
+
+func (c *ConnRbd) GetConnectorProperties() map[string]interface{} {
+	for k, _ := range c.ConnectionProperties {
+		if k == "do_local_attach" {
+			return c.ConnectionProperties
+		} else {
+			c.ConnectionProperties["do_local_attach"] = false
+		}
+	}
+	return c.ConnectionProperties
+}
+
+func (c *ConnRbd) ConnectVolume() (map[string]string, error) {
 	var err error
 	result := map[string]string{}
-	localAttach := connectionProperties["do_local_attach"]
+	localAttach := c.ConnectionProperties["do_local_attach"]
+	data := c.ConnectionProperties["data"].(map[string]interface{})
 	if IsBool(localAttach) {
-		result, err = localAttachVolume(connectionProperties["data"].(map[string]interface{}))
+		result, err = localAttachVolume(data)
 		if err != nil {
 			return nil, err
 		}
 		return result, nil
 	}
+	getRbdHandle(data)
 	return result, nil
 }
 
-func DisConnectVolume(connectionProperties map[string]interface{}, deviceInfo map[string]string) {
-	localAttach := connectionProperties["do_local_attach"]
+func (c *ConnRbd) DisConnectVolume(deviceInfo map[string]string) {
+	localAttach := c.ConnectionProperties["do_local_attach"]
 	if IsBool(localAttach) {
 		var conf string
 		if deviceInfo != nil {
 			conf = deviceInfo["conf"]
 		}
-		rootDevice := findRootDevice(connectionProperties["data"].(map[string]interface{}), conf)
+		rootDevice := findRootDevice(c.ConnectionProperties["data"].(map[string]interface{}), conf)
 		if rootDevice != "" {
 			cmd := []string{"unmap", rootDevice}
-			args := getRbdArgs(connectionProperties["data"].(map[string]interface{}), conf)
+			args := getRbdArgs(c.ConnectionProperties["data"].(map[string]interface{}), conf)
 			cmd = append(cmd, args...)
 			osBrick.Execute("rbd", cmd...)
 			if conf != "" {
@@ -44,13 +136,36 @@ func DisConnectVolume(connectionProperties map[string]interface{}, deviceInfo ma
 		}
 	}
 }
+func (c *ConnRbd) ExtendVolume() (int, error) {
+	var err error
+	localAttach := c.ConnectionProperties["do_local_attach"]
+	if IsBool(localAttach) {
+		var conf string
+		device := findRootDevice(c.ConnectionProperties["data"].(map[string]interface{}), conf)
+		if device == "" {
+			return 0, err
+		}
+		deviceName := path.Base(device)
+		deviceNumber := deviceName[3:]
 
-func findRootDevice(dataProperties map[string]interface{}, conf string) string {
-	volumeInfo := IsString(dataProperties["name"])
+		size, err := ioutil.ReadFile("/sys/devices/rbd/" + deviceNumber + "/size")
+		if err != nil {
+			return 0, err
+		}
+		strSize := string(size)
+		vSize := strings.Replace(strSize, "'", "", -1)
+		iSize, _ := strconv.Atoi(vSize)
+		return iSize, nil
+	}
+	return 0, err
+}
+
+func findRootDevice(connProperties map[string]interface{}, conf string) string {
+	volumeInfo := IsString(connProperties["name"])
 	volume := strings.Split(volumeInfo, "/")
 	poolVolume := volume[1]
 	cmd := []string{"showmapped", "--format=json"}
-	args := getRbdArgs(dataProperties, conf)
+	args := getRbdArgs(connProperties, conf)
 	cmd = append(cmd, args...)
 	res, err := osBrick.Execute("rbd", cmd...)
 	if err != nil {
@@ -70,17 +185,17 @@ func findRootDevice(dataProperties map[string]interface{}, conf string) string {
 	return ""
 }
 
-func getRbdArgs(dataProperties map[string]interface{}, conf string) []string {
+func getRbdArgs(connProperties map[string]interface{}, conf string) []string {
 	var args []string
 	if conf != "" {
 		args = append(args, "--conf")
 		args = append(args, conf)
 	}
-	user := dataProperties["auth_username"]
+	user := connProperties["auth_username"]
 	args =append(args, "--id")
 	args = append(args, IsString(user))
-	monitorIps := dataProperties["hosts"]
-	monitorPorts := dataProperties["ports"]
+	monitorIps := connProperties["hosts"]
+	monitorPorts := connProperties["ports"]
 	monHost := generateMonitorHost(monitorIps, monitorPorts)
 	args =append(args, "--mon_host")
 	args = append(args, monHost)
@@ -113,7 +228,7 @@ func IsStringList(args interface{}) []string {
 	return result
 }
 
-func localAttachVolume(dataProperties map[string]interface{}) (map[string]string, error){
+func localAttachVolume(connProperties map[string]interface{}) (map[string]string, error){
 	var res map[string]string
 	res = make(map[string]string)
 	out, err := osBrick.Execute("which", "rbd")
@@ -124,14 +239,14 @@ func localAttachVolume(dataProperties map[string]interface{}) (map[string]string
 		log.Printf("ceph-common package is not installed")
 		return nil, err
 	}
-	volumeInfo := IsString(dataProperties["name"])
+	volumeInfo := IsString(connProperties["name"])
 	volume := strings.Split(volumeInfo, "/")
 	poolName := volume[0]
 	poolVolume := volume[1]
 	rbdDevPath := getRbdDeviceName(poolName, poolVolume)
-	conf, monHosts := createNonOpenstackConfig(dataProperties)
+	conf, monHosts := createNonOpenstackConfig(connProperties)
 	fmt.Println(monHosts)
-	user := dataProperties["auth_username"]
+	user := connProperties["auth_username"]
 	_, err = os.Readlink(rbdDevPath)
 	if err != nil {
 		cmd := []string{"map", poolVolume, "--pool", poolName, "--id", IsString(user),
@@ -158,17 +273,17 @@ func localAttachVolume(dataProperties map[string]interface{}) (map[string]string
 	return res, nil
 }
 
-func createNonOpenstackConfig(dataProperties map[string]interface{}) (string,string) {
-	monitorIps := dataProperties["hosts"]
-	monitorPorts := dataProperties["ports"]
+func createNonOpenstackConfig(connProperties map[string]interface{}) (string,string) {
+	monitorIps := connProperties["hosts"]
+	monitorPorts := connProperties["ports"]
 
 	monHost := generateMonitorHost(monitorIps, monitorPorts)
-	keyring := dataProperties["keyring"]
+	keyring := connProperties["keyring"]
 	if keyring == nil {
 		return "", monHost
 	}
 
-	user := dataProperties["auth_username"]
+	user := connProperties["auth_username"]
 
 	keyFile, err := rootCreateCephKeyring(keyring, user)
 	if err != nil {
