@@ -61,12 +61,18 @@ func getRbdHandle(data map[string]interface{}) map[string]interface{} {
 	monitorIps := IsStringList(data["hosts"])
 	monitorPorts := IsStringList(data["ports"])
 	keyring := IsString(data["keyring"])
-	conf, _ := createCephConf(monitorIps, monitorPorts, clusterName, user, keyring)
+	conf, err := createCephConf(monitorIps, monitorPorts, clusterName, user, keyring)
+	if err != nil {
+		return nil
+	}
 	rbdClient, err := initiator.NewRBDClient(user, poolName, conf, clusterName)
 	if err != nil {
 		return nil
 	}
-	image := initiator.RBDVolume(rbdClient, poolVolume)
+	image, err := initiator.RBDVolume(rbdClient, poolVolume)
+	if err != nil {
+		return nil
+	}
 	metadata := initiator.NewRBDImageMetadata(image, poolName, user, conf)
 	ioWrapper := initiator.NewRBDVolumeIOWrapper(metadata)
 	result["path"] = ioWrapper
@@ -75,48 +81,48 @@ func getRbdHandle(data map[string]interface{}) map[string]interface{} {
 
 func createCephConf(monIP []string, monPort []string, clName string, user string, keyring string) (string,error) {
 	var monitors []string
-	for i, _ := range monIPs {
+	for i, _ := range monIP {
 		host := fmt.Sprintf("%s:%s", monIP[i], monPort[i])
 		monitors = append(monitors, host)
 	}
-	monitors = strings.Join(monitors, ",")
-	monitors = fmt.Sprintf("mon_host = %s", monitors)
+	monHosts := strings.Join(monitors, ",")
+	monHosts = fmt.Sprintf("mon_host = %s", monHosts)
 	userKeyring := checkOrGetKeyringContents(keyring, clName, user)
 
 	data := "[global]"
-	data = data + "\n" + monitors + "\n" + fmt.Sprintf("[client.%s]", IsString(user)) + "\n" +
+	data = data + "\n" + monHosts + "\n" + fmt.Sprintf("[client.%s]", IsString(user)) + "\n" +
 		fmt.Sprintf("keyring = %s", userKeyring)
 
-	tmpfile, err := ioutil.TempFile("/tmp", "keyfile-")
+	tmpFile, err := ioutil.TempFile("/tmp", "keyfile-")
 	if err != nil {
 		return "", fmt.Errorf("error creating a temporary keyfile: %w", err)
 	}
 	defer func() {
 		if err != nil {
 			// don't complain about unhandled error
-			_ = os.Remove(tmpfile.Name())
+			_ = os.Remove(tmpFile.Name())
 		}
 	}()
 
-	_, err = tmpfile.WriteString(data)
+	_, err = tmpFile.WriteString(data)
 	if err != nil {
 		return "", fmt.Errorf("failed to write temporary file: %w", err)
 	}
-	tmpfile.Close()
-	return file.Name(), nil
+	tmpFile.Close()
+	return tmpFile.Name(), nil
 }
 
 func checkOrGetKeyringContents(keyring string, clusterName string, user string) string {
 	if keyring == "" {
 		if user != "" {
-			keyring_path := fmt.Sprintf("/etc/ceph/%s.client.%s.keyring", clusterName, user)
-			rp, err := os.Open(keyring_path)
+			keyringPath := fmt.Sprintf("/etc/ceph/%s.client.%s.keyring", clusterName, user)
+			rp, err := os.Open(keyringPath)
 			if err != nil {
 				return ""
 			}
-			defer fp.Close()
+			defer rp.Close()
 			r := bufio.NewReader(rp)
-			userKeyring, err := r.ReadBytes(4096)
+			userKeyring, err := r.ReadString(4096)
 			if err != nil {
 				return ""
 			}
@@ -151,7 +157,7 @@ func (c *ConnRbd) GetConnectorProperties() map[string]interface{} {
 	return c.ConnectionProperties
 }
 
-func (c *ConnRbd) ConnectVolume() (map[string]string, error) {
+func (c *ConnRbd) ConnectVolume() (map[string]string, map[string]interface{}, error) {
 	var err error
 	result := map[string]string{}
 	localAttach := c.ConnectionProperties["do_local_attach"]
@@ -159,12 +165,12 @@ func (c *ConnRbd) ConnectVolume() (map[string]string, error) {
 	if IsBool(localAttach) {
 		result, err = localAttachVolume(data)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
-		return result, nil
+		return result, nil, nil
 	}
-	result = getRbdHandle(data)
-	return result, nil
+	rbdHandle := getRbdHandle(data)
+	return nil, rbdHandle, nil
 }
 
 func (c *ConnRbd) DisConnectVolume(deviceInfo map[string]string) {
@@ -224,7 +230,7 @@ func findRootDevice(connProperties map[string]interface{}, conf string) string {
 	var result []map[string]string
 	err = json.Unmarshal([]byte(res), &result)
 	if err != nil {
-		log.Fatalf("conversion json failed")
+		log.Print("conversion json failed")
 		return ""
 	}
 	for _, mapping := range result {

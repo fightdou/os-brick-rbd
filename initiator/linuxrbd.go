@@ -34,12 +34,12 @@ func NewRBDClient(user string, pool string, confFile string, rbdClusterName stri
 	return rbdConn, nil
 }
 
-func RBDVolume(client *RBDClient, volume string) *rbd.Image {
+func RBDVolume(client *RBDClient, volume string) (*rbd.Image, error) {
 	image, err := rbd.OpenImage(client.IOContext, volume, "")
 	if err != nil {
-		return nil
+		return nil, err
 	}
-	return image
+	return image, nil
 }
 
 type RBDImageMetadata struct {
@@ -61,7 +61,7 @@ func NewRBDImageMetadata(image *rbd.Image, pool string, user string, conf string
 
 type RBDVolumeIOWrapper struct {
 	*RBDImageMetadata
-	offset int
+	offset int64
 }
 
 func NewRBDVolumeIOWrapper(imageMetadata *RBDImageMetadata) *RBDVolumeIOWrapper {
@@ -69,7 +69,7 @@ func NewRBDVolumeIOWrapper(imageMetadata *RBDImageMetadata) *RBDVolumeIOWrapper 
 	return ioWrapper
 }
 
-func (r *RBDVolumeIOWrapper) rbdIMage() *rbd.Image{
+func (r *RBDVolumeIOWrapper) rbdIMage() *rbd.Image {
 	return r.RBDImageMetadata.Image
 }
 
@@ -85,23 +85,62 @@ func (r *RBDVolumeIOWrapper) rbdConf() string {
 	return r.RBDImageMetadata.Conf
 }
 
-func (r *RBDVolumeIOWrapper) Read() {
+func (r *RBDVolumeIOWrapper) Read(length int64) (int, error) {
+	offset := r.offset
+	total, err := r.RBDImageMetadata.Image.GetSize()
+	if offset >= total {
+		return 0, err
+	}
+	if length == 0 {
+		length = int64(total)
+	}
 
+	if (offset + length) > int64(total) {
+		length = int64(total) - offset
+	}
+	dataIn := make([]byte, length)
+	data, err := r.RBDImageMetadata.Image.ReadAt(dataIn, int(offset))
+	if err != nil {
+		return 0, err
+	}
+	r.incOffset(length)
+	return data, nil
 }
 
-func (r *RBDVolumeIOWrapper) Write() {
+func (r *RBDVolumeIOWrapper) incOffset(length int64) int64 {
+	r.offset += length
+	return r.offset
+}
 
+func (r *RBDVolumeIOWrapper) Write(data string, offset int64) {
+	dataOut := make([]byte, 0)
+	dataOut = []byte(data)
+	r.RBDVolumeIOWrapper.Image.WriteAt(dataOut, offset)
+	r.incOffset(length)
 }
 
 func (r *RBDVolumeIOWrapper) Seekable() bool {
 	return true
 }
 
-func (r *RBDVolumeIOWrapper) Seek() {
-
+func (r *RBDVolumeIOWrapper) Seek(offset int64, whence int64) {
+	var newOffset int64
+	if whence == 0 {
+		newOffset = offset
+	} else if whence == 1 {
+		newOffset = r.offset + offset
+	} else if whence == 2 {
+		size, _ := r.RBDImageMetadata.Image.GetSize()
+		newOffset = int64(size)
+		newOffset += offset
+	}
+	if (newOffset) < 0 {
+		panic(io.ErrClosedPipe)
+	}
+	r.offset = newOffset
 }
 
-func (r *RBDVolumeIOWrapper) Tell() int {
+func (r *RBDVolumeIOWrapper) Tell() int64 {
 	return r.offset
 }
 
