@@ -1,26 +1,15 @@
 package initiator
 
 import (
-	"github.com/fightdou/os-brick-rbd/initiator/connectors/rbd"
+	"github.com/fightdou/os-brick-rbd/common"
 	"strings"
 )
 
-type ConnFactory struct {
-	Protocol string
-	ConnectionProperties map[string]interface{}
-}
-
-func NewConnectorFactory(protocol string, connectionProperties map[string]interface{}) *ConnFactory {
-	return &ConnFactory{
-		Protocol: protocol,
-		ConnectionProperties: connectionProperties,
-	}
-}
-
-func (c *ConnFactory) NewFactory() ConnProperties {
-	switch strings.ToUpper(c.Protocol) {
+func NewConnector(protocol string, connInfo map[string]interface{}) ConnProperties {
+	switch strings.ToUpper(protocol) {
 	case "RBD":
-		return &rbd.ConnRbd{ConnectionProperties: c.ConnectionProperties}
+		connRbd := common.ParseParameter(connInfo)
+		return connRbd
 	}
 	return nil
 }

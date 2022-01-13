@@ -1,6 +1,8 @@
-package os_brick_rbd
+package utils
 
-import "os/exec"
+import (
+	"os/exec"
+)
 
 func Execute(name string, arg ...string) (string, error) {
 	cmd := exec.Command(name, arg...)

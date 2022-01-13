@@ -1,13 +1,13 @@
 package initiator
 
 import (
-	"github.com/go-ceph/rados"
-	"github.com/go-ceph/rbd"
+	"github.com/ceph/go-ceph/rados"
+	"github.com/ceph/go-ceph/rbd"
 	"io"
 )
 
 type RBDClient struct {
-	Conn *rados.Conn
+	Conn      *rados.Conn
 	IOContext *rados.IOContext
 }
 
@@ -44,17 +44,17 @@ func RBDVolume(client *RBDClient, volume string) (*rbd.Image, error) {
 
 type RBDImageMetadata struct {
 	Image *rbd.Image
-	Pool string
-	User string
-	Conf string
+	Pool  string
+	User  string
+	Conf  string
 }
 
 func NewRBDImageMetadata(image *rbd.Image, pool string, user string, conf string) *RBDImageMetadata {
 	rbdImageMetadata := &RBDImageMetadata{
 		Image: image,
-		Pool: pool,
-		User: user,
-		Conf: conf,
+		Pool:  pool,
+		User:  user,
+		Conf:  conf,
 	}
 	return rbdImageMetadata
 }
@@ -88,7 +88,7 @@ func (r *RBDVolumeIOWrapper) rbdConf() string {
 func (r *RBDVolumeIOWrapper) Read(length int64) (int, error) {
 	offset := r.offset
 	total, err := r.RBDImageMetadata.Image.GetSize()
-	if offset >= total {
+	if offset >= int64(total) {
 		return 0, err
 	}
 	if length == 0 {
@@ -99,7 +99,7 @@ func (r *RBDVolumeIOWrapper) Read(length int64) (int, error) {
 		length = int64(total) - offset
 	}
 	dataIn := make([]byte, length)
-	data, err := r.RBDImageMetadata.Image.ReadAt(dataIn, int(offset))
+	data, err := r.RBDImageMetadata.Image.ReadAt(dataIn, offset)
 	if err != nil {
 		return 0, err
 	}
@@ -115,8 +115,8 @@ func (r *RBDVolumeIOWrapper) incOffset(length int64) int64 {
 func (r *RBDVolumeIOWrapper) Write(data string, offset int64) {
 	dataOut := make([]byte, 0)
 	dataOut = []byte(data)
-	r.RBDVolumeIOWrapper.Image.WriteAt(dataOut, offset)
-	r.incOffset(length)
+	r.RBDImageMetadata.Image.WriteAt(dataOut, offset)
+	r.incOffset(offset)
 }
 
 func (r *RBDVolumeIOWrapper) Seekable() bool {

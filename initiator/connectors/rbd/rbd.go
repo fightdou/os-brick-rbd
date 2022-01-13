@@ -4,8 +4,8 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
-	osBrick "github.com/fightdou/os-brick-rbd"
 	"github.com/fightdou/os-brick-rbd/initiator"
+	osBrick "github.com/fightdou/os-brick-rbd/utils"
 	"io/ioutil"
 	"log"
 	"os"
@@ -15,7 +15,19 @@ import (
 )
 
 type ConnRbd struct {
-	ConnectionProperties map[string]interface{}
+	Name          string
+	Hosts         []string
+	Ports         []string
+	ClusterName   string
+	AuthEnabled   bool
+	AuthUserName  string
+	VolumeID      string
+	Discard       bool
+	QosSpecs      string
+	Keyring       string
+	AccessMode    string
+	Encrypted     bool
+	DoLocalAttach bool
 }
 
 func (c *ConnRbd) GetVolumePaths() []interface{} {
@@ -50,48 +62,32 @@ func (c *ConnRbd) CheckVailDevice(path interface{}, rootAccess bool) bool {
 	return true
 }
 
-func getRbdHandle(data map[string]interface{}) map[string]interface{} {
-	result := map[string]interface{}{}
-	user := IsString(data["auth_username"])
-	volumeInfo := IsString(data["name"])
-	volume := strings.Split(volumeInfo, "/")
-	poolName := volume[0]
-	poolVolume := volume[1]
-	clusterName := IsString(data["cluster_name"])
-	monitorIps := IsStringList(data["hosts"])
-	monitorPorts := IsStringList(data["ports"])
-	keyring := IsString(data["keyring"])
-	conf, err := createCephConf(monitorIps, monitorPorts, clusterName, user, keyring)
+func (c *ConnRbd) getRbdHandle() *initiator.RBDVolumeIOWrapper {
+	conf, err := c.createCephConf()
 	if err != nil {
 		return nil
 	}
-	rbdClient, err := initiator.NewRBDClient(user, poolName, conf, clusterName)
+	poolName := strings.Split(c.Name, "/")[0]
+	rbdClient, err := initiator.NewRBDClient(c.AuthUserName, poolName, conf, c.ClusterName)
 	if err != nil {
 		return nil
 	}
-	image, err := initiator.RBDVolume(rbdClient, poolVolume)
+	image, err := initiator.RBDVolume(rbdClient, c.VolumeID)
 	if err != nil {
 		return nil
 	}
-	metadata := initiator.NewRBDImageMetadata(image, poolName, user, conf)
+	metadata := initiator.NewRBDImageMetadata(image, poolName, c.AuthUserName, conf)
 	ioWrapper := initiator.NewRBDVolumeIOWrapper(metadata)
-	result["path"] = ioWrapper
-	return result
+	return ioWrapper
 }
 
-func createCephConf(monIP []string, monPort []string, clName string, user string, keyring string) (string,error) {
-	var monitors []string
-	for i, _ := range monIP {
-		host := fmt.Sprintf("%s:%s", monIP[i], monPort[i])
-		monitors = append(monitors, host)
-	}
-	monHosts := strings.Join(monitors, ",")
-	monHosts = fmt.Sprintf("mon_host = %s", monHosts)
-	userKeyring := checkOrGetKeyringContents(keyring, clName, user)
+func (c *ConnRbd) createCephConf() (string, error) {
+	monitors := c.generateMonitorHost()
+	monHosts := fmt.Sprintf("mon_host = %s", monitors)
+	userKeyring := checkOrGetKeyringContents(c.Keyring, c.ClusterName, c.AuthUserName)
 
 	data := "[global]"
-	data = data + "\n" + monHosts + "\n" + fmt.Sprintf("[client.%s]", IsString(user)) + "\n" +
-		fmt.Sprintf("keyring = %s", userKeyring)
+	data = data + "\n" + monHosts + "\n" + fmt.Sprintf("[client.%s]", c.AuthUserName) + "\n" + fmt.Sprintf("keyring = %s", userKeyring)
 
 	tmpFile, err := ioutil.TempFile("/tmp", "keyfile-")
 	if err != nil {
@@ -147,43 +143,37 @@ func checkVailDevice(path string) bool {
 }
 
 func (c *ConnRbd) GetConnectorProperties() map[string]interface{} {
-	for k, _ := range c.ConnectionProperties {
-		if k == "do_local_attach" {
-			return c.ConnectionProperties
-		} else {
-			c.ConnectionProperties["do_local_attach"] = false
-		}
+	res := map[string]interface{}{}
+	if c.DoLocalAttach {
+		res["do_local_attach"] = true
+		return res
 	}
-	return c.ConnectionProperties
+	return res
 }
 
-func (c *ConnRbd) ConnectVolume() (map[string]string, map[string]interface{}, error) {
+func (c *ConnRbd) ConnectVolume() (map[string]string, error) {
 	var err error
 	result := map[string]string{}
-	localAttach := c.ConnectionProperties["do_local_attach"]
-	data := c.ConnectionProperties["data"].(map[string]interface{})
-	if IsBool(localAttach) {
-		result, err = localAttachVolume(data)
+	if c.DoLocalAttach {
+		result, err = c.localAttachVolume()
 		if err != nil {
-			return nil, nil, err
+			return nil, err
 		}
-		return result, nil, nil
+		return result, nil
 	}
-	rbdHandle := getRbdHandle(data)
-	return nil, rbdHandle, nil
+	return nil, err
 }
 
 func (c *ConnRbd) DisConnectVolume(deviceInfo map[string]string) {
-	localAttach := c.ConnectionProperties["do_local_attach"]
-	if IsBool(localAttach) {
+	if c.DoLocalAttach {
 		var conf string
 		if deviceInfo != nil {
 			conf = deviceInfo["conf"]
 		}
-		rootDevice := findRootDevice(c.ConnectionProperties["data"].(map[string]interface{}), conf)
+		rootDevice := c.findRootDevice(conf)
 		if rootDevice != "" {
 			cmd := []string{"unmap", rootDevice}
-			args := getRbdArgs(c.ConnectionProperties["data"].(map[string]interface{}), conf)
+			args := c.getRbdArgs(conf)
 			cmd = append(cmd, args...)
 			osBrick.Execute("rbd", cmd...)
 			if conf != "" {
@@ -192,36 +182,38 @@ func (c *ConnRbd) DisConnectVolume(deviceInfo map[string]string) {
 		}
 	}
 }
-func (c *ConnRbd) ExtendVolume() (int, error) {
+
+func (c *ConnRbd) ExtendVolume() (int64, error) {
 	var err error
-	localAttach := c.ConnectionProperties["do_local_attach"]
-	if IsBool(localAttach) {
+	if c.DoLocalAttach {
 		var conf string
-		device := findRootDevice(c.ConnectionProperties["data"].(map[string]interface{}), conf)
+		device := c.findRootDevice(conf)
 		if device == "" {
 			return 0, err
 		}
 		deviceName := path.Base(device)
 		deviceNumber := deviceName[3:]
-
 		size, err := ioutil.ReadFile("/sys/devices/rbd/" + deviceNumber + "/size")
 		if err != nil {
 			return 0, err
 		}
 		strSize := string(size)
 		vSize := strings.Replace(strSize, "'", "", -1)
-		iSize, _ := strconv.Atoi(vSize)
+		iSize, _ := strconv.ParseInt(vSize, 10, 64)
 		return iSize, nil
+	} else {
+		handle := c.getRbdHandle()
+		handle.Seek(0, 2)
+		return handle.Tell(), err
 	}
 	return 0, err
 }
 
-func findRootDevice(connProperties map[string]interface{}, conf string) string {
-	volumeInfo := IsString(connProperties["name"])
-	volume := strings.Split(volumeInfo, "/")
+func (c *ConnRbd) findRootDevice(conf string) string {
+	volume := strings.Split(c.Name, "/")
 	poolVolume := volume[1]
 	cmd := []string{"showmapped", "--format=json"}
-	args := getRbdArgs(connProperties, conf)
+	args := c.getRbdArgs(conf)
 	cmd = append(cmd, args...)
 	res, err := osBrick.Execute("rbd", cmd...)
 	if err != nil {
@@ -241,52 +233,23 @@ func findRootDevice(connProperties map[string]interface{}, conf string) string {
 	return ""
 }
 
-func getRbdArgs(connProperties map[string]interface{}, conf string) []string {
+func (c *ConnRbd) getRbdArgs(conf string) []string {
 	var args []string
 	if conf != "" {
 		args = append(args, "--conf")
 		args = append(args, conf)
 	}
-	user := connProperties["auth_username"]
-	args =append(args, "--id")
-	args = append(args, IsString(user))
-	monitorIps := connProperties["hosts"]
-	monitorPorts := connProperties["ports"]
-	monHost := generateMonitorHost(monitorIps, monitorPorts)
-	args =append(args, "--mon_host")
+	args = append(args, "--id")
+	args = append(args, c.AuthUserName)
+
+	monHost := c.generateMonitorHost()
+	args = append(args, "--mon_host")
 	args = append(args, monHost)
 	return args
-
-}
-func IsBool(args interface{}) bool {
-	temp := fmt.Sprint(args)
-	var res bool
-	switch args.(type) {
-	case bool:
-		res, _ := strconv.ParseBool(temp)
-		return res
-	default:
-		return res
-	}
 }
 
-func IsString(args interface{}) string {
-	temp := fmt.Sprint(args)
-	return temp
-}
-
-func IsStringList(args interface{}) []string {
-	argsList := args.([]interface{})
-	result := make([]string, len(argsList))
-	for i, v := range argsList {
-		result[i] = v.(string)
-	}
-	return result
-}
-
-func localAttachVolume(connProperties map[string]interface{}) (map[string]string, error){
-	var res map[string]string
-	res = make(map[string]string)
+func (c *ConnRbd) localAttachVolume() (map[string]string, error) {
+	res := map[string]string{}
 	out, err := osBrick.Execute("which", "rbd")
 	if err != nil {
 		return nil, err
@@ -295,17 +258,16 @@ func localAttachVolume(connProperties map[string]interface{}) (map[string]string
 		log.Printf("ceph-common package is not installed")
 		return nil, err
 	}
-	volumeInfo := IsString(connProperties["name"])
-	volume := strings.Split(volumeInfo, "/")
+
+	volume := strings.Split(c.Name, "/")
 	poolName := volume[0]
 	poolVolume := volume[1]
 	rbdDevPath := getRbdDeviceName(poolName, poolVolume)
-	conf, monHosts := createNonOpenstackConfig(connProperties)
-	fmt.Println(monHosts)
-	user := connProperties["auth_username"]
+	conf, monHosts := c.createNonOpenstackConfig()
+
 	_, err = os.Readlink(rbdDevPath)
 	if err != nil {
-		cmd := []string{"map", poolVolume, "--pool", poolName, "--id", IsString(user),
+		cmd := []string{"map", poolVolume, "--pool", poolName, "--id", c.AuthUserName,
 			"--mon_host", monHosts}
 		if conf != "" {
 			cmd = append(cmd, "--conf")
@@ -329,49 +291,35 @@ func localAttachVolume(connProperties map[string]interface{}) (map[string]string
 	return res, nil
 }
 
-func createNonOpenstackConfig(connProperties map[string]interface{}) (string,string) {
-	monitorIps := connProperties["hosts"]
-	monitorPorts := connProperties["ports"]
-
-	monHost := generateMonitorHost(monitorIps, monitorPorts)
-	keyring := connProperties["keyring"]
-	if keyring == nil {
+func (c *ConnRbd) createNonOpenstackConfig() (string, string) {
+	monHost := c.generateMonitorHost()
+	if c.Keyring == "" {
 		return "", monHost
 	}
-
-	user := connProperties["auth_username"]
-
-	keyFile, err := rootCreateCephKeyring(keyring, user)
+	keyFile, err := c.rootCreateCephKeyring()
 	if err != nil {
 		return "", monHost
 	}
-	conf, err := rootCreateCephConf(keyFile, monHost, user)
+	conf, err := c.rootCreateCephConf(keyFile, monHost)
 	if err != nil {
 		return "", monHost
 	}
 	return conf, monHost
 }
 
-func generateMonitorHost(monitorIps interface{}, monitorPorts interface{}) string {
-	var monIPs []string
-	var monPorts []string
-	monIPs = IsStringList(monitorIps)
-	monPorts = IsStringList(monitorPorts)
+func (c *ConnRbd) generateMonitorHost() string {
 	var monHosts []string
-	for i, _ := range monIPs {
-		host := fmt.Sprintf("%s:%s", monIPs[i], monPorts[i])
+	for i, _ := range c.Hosts {
+		host := fmt.Sprintf("%s:%s", c.Hosts[i], c.Ports[i])
 		monHosts = append(monHosts, host)
 	}
 	monHost := strings.Join(monHosts, ",")
 	return monHost
 }
 
-func rootCreateCephKeyring(keyring interface{}, user interface{}) (string, error){
-	keyrings := IsString(keyring)
-	users := IsString(user)
-
+func (c *ConnRbd) rootCreateCephKeyring() (string, error) {
 	var keyfileInfo string
-	keyfileInfo = fmt.Sprintf("[client.%s]", users) + "\n" + fmt.Sprintf("key = %s", keyrings)
+	keyfileInfo = fmt.Sprintf("[client.%s]", c.AuthUserName) + "\n" + fmt.Sprintf("key = %s", c.Keyring)
 
 	tmpfile, err := ioutil.TempFile("/tmp", "keyfile-")
 	if err != nil {
@@ -401,9 +349,9 @@ func rootCreateCephKeyring(keyring interface{}, user interface{}) (string, error
 	return keyFile, nil
 }
 
-func rootCreateCephConf(keyFile string, monHost string, user interface{}) (string, error) {
+func (c *ConnRbd) rootCreateCephConf(keyFile string, monHost string) (string, error) {
 	data := "[global]"
-	data = data + "\n" + monHost + "\n" + fmt.Sprintf("[client.%s]", IsString(user)) + "\n" +
+	data = data + "\n" + monHost + "\n" + fmt.Sprintf("[client.%s]", c.AuthUserName) + "\n" +
 		fmt.Sprintf("keyring = %s", keyFile)
 
 	file, err := ioutil.TempFile("/tmp", "brickrbd_")
@@ -429,4 +377,3 @@ func rootCreateCephConf(keyFile string, monHost string, user interface{}) (strin
 func getRbdDeviceName(pool string, volume string) string {
 	return fmt.Sprintf("/dev/rbd/%s/%s", pool, volume)
 }
-

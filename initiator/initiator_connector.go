@@ -7,8 +7,7 @@ type ConnProperties interface {
 	DisConnectVolume(map[string]string)
 	GetVolumePaths() []interface{}
 	GetSearchPath() interface{}
-	ExtendVolume() (int, error)
+	ExtendVolume() (int64, error)
 	GetALLAvailableVolumes() interface{}
 	CheckIOHandlerValid() error
 }
-
