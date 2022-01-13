@@ -377,3 +377,21 @@ func (c *ConnRbd) rootCreateCephConf(keyFile string, monHost string) (string, er
 func getRbdDeviceName(pool string, volume string) string {
 	return fmt.Sprintf("/dev/rbd/%s/%s", pool, volume)
 }
+
+func NewRBDConnector(connInfo map[string]interface{}) *ConnRbd {
+	data := connInfo["data"].(map[string]interface{})
+	conn := &ConnRbd{}
+	conn.Name = osBrick.IsString(data["name"])
+	conn.Hosts = osBrick.IsStringList(data["hosts"])
+	conn.Ports = osBrick.IsStringList(data["ports"])
+	conn.ClusterName = osBrick.IsString(data["cluster_name"])
+	conn.AuthEnabled = osBrick.IsBool(data["auth_enabled"])
+	conn.AuthUserName = osBrick.IsString(data["auth_username"])
+	conn.VolumeID = osBrick.IsString(data["volume_id"])
+	conn.Discard = osBrick.IsBool(data["discard"])
+	conn.QosSpecs = osBrick.IsString(data["qos_specs"])
+	conn.AccessMode = osBrick.IsString(data["access_mode"])
+	conn.Encrypted = osBrick.IsBool(data["encrypted"])
+	conn.DoLocalAttach = osBrick.IsBool(connInfo["do_local_attach"])
+	return conn
+}
