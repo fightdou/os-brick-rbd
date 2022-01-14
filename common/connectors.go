@@ -9,6 +9,7 @@ import (
 func NewConnector(protocol string, connInfo map[string]interface{}) initiator.ConnProperties {
 	switch strings.ToUpper(protocol) {
 	case "RBD":
+		connInfo["do_local_attach"] = true
 		connRbd := rbd.NewRBDConnector(connInfo)
 		return connRbd
 	}

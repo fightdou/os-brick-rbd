@@ -118,7 +118,7 @@ func checkOrGetKeyringContents(keyring string, clusterName string, user string) 
 			}
 			defer rp.Close()
 			r := bufio.NewReader(rp)
-			userKeyring, err := r.ReadString(4096)
+			userKeyring, err := r.ReadString('\n')
 			if err != nil {
 				return ""
 			}
@@ -135,7 +135,7 @@ func checkVailDevice(path string) bool {
 	}
 	defer rp.Close()
 	r := bufio.NewReader(rp)
-	_, err = r.ReadBytes(4096)
+	_, err = r.ReadBytes('\n')
 	if err != nil {
 		return false
 	}
