@@ -6,6 +6,7 @@ import (
 	"strconv"
 )
 
+// Execute exec a shell command
 func Execute(name string, arg ...string) (string, error) {
 	cmd := exec.Command(name, arg...)
 	stdoutStderr, err := cmd.CombinedOutput()

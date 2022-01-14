@@ -1,7 +1,7 @@
 package initiator
 
+// ConnProperties is base class interface
 type ConnProperties interface {
-	GetConnectorProperties() map[string]interface{}
 	CheckVailDevice(interface{}, bool) bool
 	ConnectVolume() (map[string]string, error)
 	DisConnectVolume(map[string]string)
