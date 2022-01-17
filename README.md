@@ -15,7 +15,7 @@ import (
         "github.com/gophercloud/gophercloud/openstack"
         "github.com/gophercloud/gophercloud/openstack/blockstorage/extensions/volumeactions"
         "github.com/gophercloud/gophercloud/openstack/blockstorage/v3/volumes"
-	"github.com/fightdou/os-brick-rbd/common"
+	"github.com/fightdou/os-brick-rbd/initiator"
 )
 
 func getConnectionInfo(blockstorageClient *gophercloud.ServiceClient, volumeID string)  map[string]interface{} {
@@ -74,7 +74,7 @@ func main() {
         protocol := result["driver_volume_type"]
         strProtocol := fmt.Sprint(protocol)
 	// 连接卷
-	conn := common.NewConnector(strProtocol, result)
+	conn := initiator.NewConnector(strProtocol, result)
 	conn.ConnectVolume()
 	// 卸载卷
 	conn.DisConnectVolume(nil)

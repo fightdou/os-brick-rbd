@@ -1,7 +1,7 @@
 package initiator
 
 import (
-	// "github.com/fightdou/os-brick-rbd/initiator/connectors/rbd"
+	"github.com/fightdou/os-brick-rbd/initiator/connectors/rbd"
 	"strings"
 )
 
@@ -10,7 +10,7 @@ func NewConnector(protocol string, connInfo map[string]interface{}) ConnProperti
 	switch strings.ToUpper(protocol) {
 	case "RBD":
 		connInfo["do_local_attach"] = true
-		connRbd := NewRBDConnector(connInfo)
+		connRbd := rbd.NewRBDConnector(connInfo)
 		return connRbd
 	}
 	return nil
