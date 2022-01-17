@@ -1,4 +1,4 @@
-package connectors
+package rbd
 
 import (
 	"github.com/ceph/go-ceph/rados"
