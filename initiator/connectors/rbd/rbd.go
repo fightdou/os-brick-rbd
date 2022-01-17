@@ -4,7 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
-	"github.com/fightdou/os-brick-rbd/initiator"
+	"github.com/fightdou/os-brick-rbd/initiator/connectors"
 	osBrick "github.com/fightdou/os-brick-rbd/utils"
 	"github.com/wonderivan/logger"
 	"io/ioutil"
@@ -241,25 +241,25 @@ func (c *ConnRbd) generateMonitorHost() string {
 }
 
 // getRbdHandle return RBDVolumeIOWrapper
-func (c *ConnRbd) getRbdHandle() *initiator.RBDVolumeIOWrapper {
+func (c *ConnRbd) getRbdHandle() *connectors.RBDVolumeIOWrapper {
 	conf, err := c.createCephConf()
 	if err != nil {
 		logger.Error("Create ceph conf failed", err)
 		return nil
 	}
 	poolName := strings.Split(c.Name, "/")[0]
-	rbdClient, err := initiator.NewRBDClient(c.AuthUserName, poolName, conf, c.ClusterName)
+	rbdClient, err := connectors.NewRBDClient(c.AuthUserName, poolName, conf, c.ClusterName)
 	if err != nil {
 		logger.Error("Get rbd client failed", err)
 		return nil
 	}
-	image, err := initiator.RBDVolume(rbdClient, c.VolumeID)
+	image, err := connectors.RBDVolume(rbdClient, c.VolumeID)
 	if err != nil {
 		logger.Error("Get rbd volume failed", err)
 		return nil
 	}
-	metadata := initiator.NewRBDImageMetadata(image, poolName, c.AuthUserName, conf)
-	ioWrapper := initiator.NewRBDVolumeIOWrapper(metadata)
+	metadata := connectors.NewRBDImageMetadata(image, poolName, c.AuthUserName, conf)
+	ioWrapper := connectors.NewRBDVolumeIOWrapper(metadata)
 	return ioWrapper
 }
 

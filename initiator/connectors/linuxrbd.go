@@ -1,4 +1,4 @@
-package initiator
+package connectors
 
 import (
 	"github.com/ceph/go-ceph/rados"
