@@ -4,7 +4,7 @@
 
 - 调用 openstack go gophercloud 创建一个volume
 - 调用 getConnectionInfo 获取 volume 的初始化信息
-- 有了信息之后就执行连接卷、卸载卷等操作
+- 有了信息之后就执行连接卷、卸载卷等操作.
 
 ```go
 package main
