@@ -15,6 +15,7 @@ type ConnProperties interface {
 	ExtendVolume() (int64, error)
 	GetALLAvailableVolumes() interface{}
 	CheckIOHandlerValid() error
+	GetDevicePath() string
 }
 
 // NewConnector Build a Connector object based upon protocol and architecture
