@@ -2,8 +2,11 @@ package utils
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
 	"strconv"
+
+	"github.com/wonderivan/logger"
 )
 
 // Execute a shell command

@@ -48,6 +48,8 @@ func NewISCSIConnector(connInfo map[string]interface{}) *ConnISCSI {
 	conn.Encrypted = utils.ToBool(data["encrypted"])
 	return conn
 }
+
+//ConnectVolume Attach the volume to pod
 func (c *ConnISCSI) ConnectVolume() (map[string]string, error) {
 	var res map[string]string
 	if len(c.targetIqns) != 1 {
@@ -66,6 +68,7 @@ func (c *ConnISCSI) ConnectVolume() (map[string]string, error) {
 	return res, nil
 }
 
+//DisConnectVolume Detach the volume from pod
 func (c *ConnISCSI) DisConnectVolume() {
 	err := c.cleanupConnection()
 	if err != nil {
@@ -73,10 +76,12 @@ func (c *ConnISCSI) DisConnectVolume() {
 	}
 }
 
+//ExtendVolume Update the local kernel's size information
 func (c *ConnISCSI) ExtendVolume() (int64, error) {
 	return 0, nil
 }
 
+//GetDevicePath Get mount device local path
 func (c *ConnISCSI) GetDevicePath() string {
 	target := c.getAllTargets()
 	var devicePath string
@@ -86,10 +91,12 @@ func (c *ConnISCSI) GetDevicePath() string {
 	return devicePath
 }
 
+//cleanupConnection Cleans up connection flushing and removing devices and multipath
 func (c *ConnISCSI) cleanupConnection() error {
 	target := c.getAllTargets()
 	deviceMap, err := iscsi.GetConnectionDevices(target)
 	if err != nil {
+		logger.Error("Get iscsi connection device failed", err)
 		return err
 	}
 	var devicePaths []string
@@ -103,22 +110,27 @@ func (c *ConnISCSI) cleanupConnection() error {
 
 	rErr := iscsi.RemoveConnection(deviceMap, isMultiPath)
 	if rErr != nil {
+		logger.Error("Remove iscsi connection failed", rErr)
 		return rErr
 	}
 	attachedDevices, err := iscsi.GetAttachedSCSIDevices()
 	if err != nil {
-		return fmt.Errorf("failed to get attached devices: %w", err)
+		logger.Error("failed to get attached devices", err)
+		return err
 	}
 
 	if len(attachedDevices) == 0 {
 		// call logout when No action session
 		if err := iscsi.DisconnectConnection(target); err != nil {
-			return fmt.Errorf("failed to disconnet iSCSI connection: %w", err)
+			logger.Error("failed to disconnet iSCSI connection", err)
+			return err
 		}
 	}
+	logger.Info("Cleanup iscsi connection success!")
 	return nil
 }
 
+//connectMultiPathVolume Connect to a multipathed volume launching parallel login requests
 func (c *ConnISCSI) connectMultiPathVolume() (string, error) {
 	var err error
 	target := c.getIpsIqnsLuns()
@@ -128,7 +140,8 @@ func (c *ConnISCSI) connectMultiPathVolume() (string, error) {
 		wg.Add(1)
 		device, err := iscsi.ConVolume(p.Portal, p.Iqn, p.Lun)
 		if err != nil {
-			return "", fmt.Errorf("failed to connect volume: %w", err)
+			logger.Error("Failed to connect volume", err)
+			return "", err
 		}
 		devices = append(devices, device)
 		wg.Done()
@@ -142,26 +155,26 @@ func (c *ConnISCSI) connectMultiPathVolume() (string, error) {
 			logger.Info("found dm device: %v", dm)
 			break
 		}
-
 		logger.Error("found err, continue... [device: %s] [err: %s]", d, err.Error())
 		continue
 	}
 	return filepath.Join("/dev", dm), nil
 }
 
+//connectSinglePathVolume Connect to a volume using a single path.
 func (c *ConnISCSI) connectSinglePathVolume() (string, error) {
 	target := c.getAllTargets()
-	if len(target) != 1 {
-		return "", fmt.Errorf("found multipath but call ConnectSinglePathVolume")
-	}
 	p := target[0]
 	device, err := iscsi.ConVolume(p.Portal, p.Iqn, c.targetLun)
 	if err != nil {
+		logger.Error("Request connect iscsi volume failed", err)
 		return "", err
 	}
+	logger.Info("Connect iscsi %s volume success", device)
 	return filepath.Join("/dev/", device), nil
 }
 
+//getIpsIqnsLuns Build a list of ips, iqns, and luns
 func (c *ConnISCSI) getIpsIqnsLuns() []iscsi.Target {
 	if c.targetPortals != nil && c.targetIqns != nil {
 		ipsIqnsLuns := c.getAllTargets()
@@ -172,6 +185,7 @@ func (c *ConnISCSI) getIpsIqnsLuns() []iscsi.Target {
 	}
 }
 
+//getAllTargets Get target include ips, iqns, and luns
 func (c *ConnISCSI) getAllTargets() []iscsi.Target {
 	var allTarget []iscsi.Target
 	if len(c.targetPortals) > 1 && len(c.targetIqns) > 1 {
