@@ -6,35 +6,40 @@ import (
 	"strconv"
 )
 
-// Execute exec a shell command
-func Execute(name string, arg ...string) (string, error) {
-	cmd := exec.Command(name, arg...)
+// Execute a shell command
+func Execute(command string, arg ...string) (string, error) {
+	cmd := exec.Command(command, arg...)
 	stdoutStderr, err := cmd.CombinedOutput()
 	return string(stdoutStderr), err
 }
 
-func IsBool(args interface{}) bool {
-	temp := fmt.Sprint(args)
-	var res bool
-	switch args.(type) {
+func ToBool(i interface{}) bool {
+	switch res := i.(type) {
 	case bool:
-		res, _ := strconv.ParseBool(temp)
 		return res
+	case int, int32, int64, uint, uint32, uint64:
+		return res != 0
+	case string:
+		result, err := strconv.ParseBool(res)
+		if err != nil {
+			panic(err.Error())
+		}
+		return result
 	default:
-		return res
+		panic(fmt.Sprintf("Can not convert %T to bool.", res))
 	}
 }
 
-func IsString(args interface{}) string {
-	temp := fmt.Sprint(args)
-	return temp
+func ToString(i interface{}) string {
+	res := fmt.Sprint(i)
+	return res
 }
 
-func IsStringList(args interface{}) []string {
-	argsList := args.([]interface{})
-	result := make([]string, len(argsList))
-	for i, v := range argsList {
-		result[i] = v.(string)
+func ToStringSlice(i interface{}) []string {
+	resSlice := i.([]interface{})
+	result := make([]string, len(resSlice))
+	for i, v := range resSlice {
+		result[i] = ToString(v)
 	}
 	return result
 }

@@ -1,20 +1,16 @@
 package connectors
 
 import (
-	"github.com/fightdou/os-brick-rbd/connectors/rbd"
 	"strings"
+
+	"github.com/kungze/golang-os-brick/rbd"
 )
 
 // ConnProperties is base class interface
 type ConnProperties interface {
-	CheckVailDevice(interface{}, bool) bool
 	ConnectVolume() (map[string]string, error)
-	DisConnectVolume(map[string]string)
-	GetVolumePaths() []interface{}
-	GetSearchPath() interface{}
+	DisConnectVolume() error
 	ExtendVolume() (int64, error)
-	GetALLAvailableVolumes() interface{}
-	CheckIOHandlerValid() error
 	GetDevicePath() string
 }
 
@@ -22,9 +18,9 @@ type ConnProperties interface {
 func NewConnector(protocol string, connInfo map[string]interface{}) ConnProperties {
 	switch strings.ToUpper(protocol) {
 	case "RBD":
+		// Only supported local attach volume
 		connInfo["do_local_attach"] = true
-		connRbd := rbd.NewRBDConnector(connInfo)
-		return connRbd
+		return rbd.NewRBDConnector(connInfo)
 	}
 	return nil
 }

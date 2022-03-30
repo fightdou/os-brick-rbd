@@ -1,10 +1,11 @@
-# os-brick-rbd
+# golang-os-brick
+Implement a golang library for managing local volume attaches, refer to openstack os-brick.
 
 ## Demo
 
 - 调用 openstack go gophercloud 创建一个volume
 - 调用 getConnectionInfo 获取 volume 的初始化信息
-- 有了信息之后就执行连接卷、卸载卷等操作.
+- 有了信息之后就执行连接卷、卸载卷等操作
 
 ```go
 package main
@@ -15,10 +16,11 @@ import (
         "github.com/gophercloud/gophercloud/openstack"
         "github.com/gophercloud/gophercloud/openstack/blockstorage/extensions/volumeactions"
         "github.com/gophercloud/gophercloud/openstack/blockstorage/v3/volumes"
-	"github.com/fightdou/os-brick-rbd/connectors"
+        "github.com/kungze/golang-os-brick/connectors"
+        "time"
 )
 
-func getConnectionInfo(blockstorageClient *gophercloud.ServiceClient, volumeID string)  map[string]interface{} {
+func getConnectionInfo(blockstorageClient *gophercloud.ServiceClient, volumeID string) map[string]interface{} {
         options := &volumeactions.InitializeConnectionOpts{}
         connInfo := volumeactions.InitializeConnection(blockstorageClient, volumeID, options)
         res, _ := connInfo.Extract()
@@ -28,10 +30,10 @@ func getConnectionInfo(blockstorageClient *gophercloud.ServiceClient, volumeID s
 func main() {
         opts := gophercloud.AuthOptions{
                 IdentityEndpoint: "http://keystone.openstack.svc.cluster.local",
-                Username: "admin",
-                Password: "password",
-                TenantName: "admin",
-                DomainName: "Default",
+                Username:         "admin",
+                Password:         "password",
+                TenantName:       "admin",
+                DomainName:       "Default",
         }
 
         provider, err := openstack.AuthenticatedClient(opts)
@@ -46,11 +48,13 @@ func main() {
         }
 
         volume_opts := &volumes.CreateOpts{
-		Name:             "os-brick1",
-		Size:             1,
-		AvailabilityZone: "nova",
-	}
-	_, err = volumes.Create(blockstorageClient, volume_opts).Extract()
+                Name:             "os-brick1",
+                Size:             1,
+                AvailabilityZone: "nova",
+        }
+        _, err = volumes.Create(blockstorageClient, volume_opts).Extract()
+
+        time.Sleep(5 * time.Second)
 
         allPages, err := volumes.List(blockstorageClient, &volumes.ListOpts{Name: "os-brick1"}).AllPages()
         actual, err := volumes.ExtractVolumes(allPages)
@@ -64,7 +68,7 @@ func main() {
 
         err = volumeactions.Attach(blockstorageClient, volumeId, &volumeactions.AttachOpts{
                 MountPoint: "None",
-                HostName: "None",
+                HostName:   "None",
         }).ExtractErr()
 
         if err != nil {
@@ -73,12 +77,13 @@ func main() {
         result := getConnectionInfo(blockstorageClient, volumeId)
         protocol := result["driver_volume_type"]
         strProtocol := fmt.Sprint(protocol)
-	// 连接卷
-	conn := connectors.NewConnector(strProtocol, result)
-	conn.ConnectVolume()
-	// 卸载卷
-	conn.DisConnectVolume(nil)
+        // 连接卷
+        conn := connectors.NewConnector(strProtocol, result)
+        conn.ConnectVolume()
+        // 卸载卷
+        conn.DisConnectVolume()
 }
+
 
 ```
 
@@ -99,4 +104,3 @@ rbd1   251:16   0    5G  0 disk /var/lib/kubelet/pods/05687bec-854a-40f0-9a4f-d7
 rbd2   251:32   0    1G  0 disk
 
 ```
-
