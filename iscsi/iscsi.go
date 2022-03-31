@@ -19,7 +19,7 @@ type ConnISCSI struct {
 	targetIqns       []string
 	targetLun        int
 	targetLuns       []int
-	volumeID         bool
+	volumeID         string
 	authMethod       string
 	authUsername     string
 	authPassword     string
@@ -41,7 +41,7 @@ func NewISCSIConnector(connInfo map[string]interface{}) *ConnISCSI {
 	}
 	conn.targetIqn = utils.ToString(data["target_iqn"])
 	conn.targetLun = utils.ToInt(data["target_lun"])
-	conn.volumeID = utils.ToBool(data["volume_id"])
+	conn.volumeID = utils.ToString(data["volume_id"])
 	conn.authMethod = utils.ToString(data["auth_method"])
 	conn.authUsername = utils.ToString(data["auth_username"])
 	conn.authPassword = utils.ToString(data["auth_password"])
@@ -54,7 +54,7 @@ func NewISCSIConnector(connInfo map[string]interface{}) *ConnISCSI {
 //ConnectVolume Attach the volume to pod
 func (c *ConnISCSI) ConnectVolume() (map[string]string, error) {
 	res := map[string]string{}
-	if len(c.targetIqns) != 1 {
+	if len(c.targetIqns) >= 1 {
 		device, err := c.connectMultiPathVolume()
 		if err != nil {
 			return nil, err
