@@ -10,7 +10,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/fightdou/os-brick-rbd/utils"
+	"github.com/fightdou/os-brick-rbd/pkg/utils"
 	"github.com/wonderivan/logger"
 )
 
