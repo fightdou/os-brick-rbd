@@ -3,7 +3,7 @@ package connectors
 import (
 	"testing"
 
-	"github.com/kungze/golang-os-brick/rbd"
+	"github.com/fightdou/os-brick-rbd/rbd"
 )
 
 func TestNewConnector(t *testing.T) {

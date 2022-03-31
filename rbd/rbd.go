@@ -10,7 +10,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/kungze/golang-os-brick/utils"
+	"github.com/fightdou/os-brick-rbd/utils"
 	"github.com/wonderivan/logger"
 )
 

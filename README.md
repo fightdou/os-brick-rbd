@@ -16,7 +16,7 @@ import (
         "github.com/gophercloud/gophercloud/openstack"
         "github.com/gophercloud/gophercloud/openstack/blockstorage/extensions/volumeactions"
         "github.com/gophercloud/gophercloud/openstack/blockstorage/v3/volumes"
-        "github.com/kungze/golang-os-brick/connectors"
+        "github.com/fightdou/os-brick-rbd/connectors"
         "time"
 )
 

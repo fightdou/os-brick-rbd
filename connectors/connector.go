@@ -3,8 +3,8 @@ package connectors
 import (
 	"strings"
 
-	"github.com/kungze/golang-os-brick/iscsi"
-	"github.com/kungze/golang-os-brick/rbd"
+	"github.com/fightdou/os-brick-rbd/iscsi"
+	"github.com/fightdou/os-brick-rbd/rbd"
 )
 
 // ConnProperties is base class interface

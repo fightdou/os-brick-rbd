@@ -1,4 +1,4 @@
-module github.com/kungze/golang-os-brick
+module github.com/fightdou/os-brick-rbd
 
 go 1.17
 

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kungze/golang-os-brick/utils"
+	"github.com/fightdou/os-brick-rbd/pkg/utils"
 )
 
 var callRecords []string
