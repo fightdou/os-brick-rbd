@@ -51,7 +51,7 @@ func NewISCSIConnector(connInfo map[string]interface{}) *ConnISCSI {
 
 //ConnectVolume Attach the volume to pod
 func (c *ConnISCSI) ConnectVolume() (map[string]string, error) {
-	var res map[string]string
+	res := map[string]string{}
 	if len(c.targetIqns) != 1 {
 		device, err := c.connectMultiPathVolume()
 		if err != nil {
@@ -69,11 +69,13 @@ func (c *ConnISCSI) ConnectVolume() (map[string]string, error) {
 }
 
 //DisConnectVolume Detach the volume from pod
-func (c *ConnISCSI) DisConnectVolume() {
+func (c *ConnISCSI) DisConnectVolume() error {
 	err := c.cleanupConnection()
 	if err != nil {
 		logger.Error("Disconnect volume failed", err)
+		return err
 	}
+	return nil
 }
 
 //ExtendVolume Update the local kernel's size information
