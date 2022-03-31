@@ -34,11 +34,13 @@ func NewISCSIConnector(connInfo map[string]interface{}) *ConnISCSI {
 	conn := &ConnISCSI{}
 	conn.targetDiscovered = utils.ToBool(data["target_discovered"])
 	conn.targetPortal = utils.ToString(data["target_portal"])
-	conn.targetPortals = utils.ToStringSlice(data["target_portal"])
+	if data["target_portals"] != nil && data["target_iqns"] != nil && data["target_luns"] != nil {
+		conn.targetPortals = utils.ToStringSlice(data["target_portals"])
+		conn.targetIqns = utils.ToStringSlice(data["target_iqns"])
+		conn.targetLuns = utils.ToIntSlice(data["target_luns"])
+	}
 	conn.targetIqn = utils.ToString(data["target_iqn"])
-	conn.targetIqns = utils.ToStringSlice(data["target_iqns"])
 	conn.targetLun = utils.ToInt(data["target_lun"])
-	conn.targetLuns = utils.ToIntSlice(data["target_luns"])
 	conn.volumeID = utils.ToBool(data["volume_id"])
 	conn.authMethod = utils.ToString(data["auth_method"])
 	conn.authUsername = utils.ToString(data["auth_username"])
