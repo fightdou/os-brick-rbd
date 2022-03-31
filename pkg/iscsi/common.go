@@ -1,7 +1,6 @@
 package iscsi
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -12,8 +11,6 @@ import (
 	"github.com/fightdou/os-brick-rbd/pkg/utils"
 	"github.com/wonderivan/logger"
 )
-
-var RetryCount int = 10
 
 // Hctl is IDs of SCSI
 type Hctl struct {
@@ -89,25 +86,6 @@ func ScanISCSI(hctl *Hctl) error {
 	return utils.EchoScsiCommand(path, content)
 }
 
-func ConVolume(portal string, iqn string, lun int) (string, error) {
-	sessionId, err := connectToIscsiPortal(portal, iqn)
-	if err != nil {
-		return "", err
-	}
-	hctl, err := GetHctl(sessionId, lun)
-	if err != nil {
-		return "", err
-	}
-	if err := ScanISCSI(hctl); err != nil {
-		return "", fmt.Errorf("failed to rescan target: %w", err)
-	}
-	device, err := GetDeviceName(sessionId, hctl)
-	if err != nil {
-		return "", fmt.Errorf("failed to get device name: %w", err)
-	}
-	return device, nil
-}
-
 func GetDeviceName(id int, hctl *Hctl) (string, error) {
 	p := fmt.Sprintf(
 		"/sys/class/iscsi_host/host%d/device/session%d/target%d:%d:%d/%d:%d:%d:%d/block/*",
@@ -127,26 +105,6 @@ func GetDeviceName(id int, hctl *Hctl) (string, error) {
 	_, deviceName := filepath.Split(paths[0])
 
 	return deviceName, nil
-}
-
-func connectToIscsiPortal(portal string, iqn string) (int, error) {
-	if err := LoginPortal(portal, iqn); err != nil {
-		logger.Error("Iscsi login portal failed", err)
-		return 0, err
-	}
-	for i := 0; i < RetryCount; i++ {
-		sessions, err := GetSessions()
-		if err != nil {
-			logger.Error("Get iscsi session failed", err)
-			return 0, err
-		}
-		for _, session := range sessions {
-			if session.TargetPortal == portal && session.IQN == iqn {
-				return session.SessionID, nil
-			}
-		}
-	}
-	return -1, errors.New("session id not found")
 }
 
 func removeScsiDevice(devicePath string) error {
@@ -172,7 +130,6 @@ func removeScsiDevice(devicePath string) error {
 
 func waitForVolumesRemoval(targetDevicePaths []string) bool {
 	exist := false
-
 	for _, devicePath := range targetDevicePaths {
 		_, err := os.Stat(devicePath)
 		if err == nil {
@@ -181,25 +138,21 @@ func waitForVolumesRemoval(targetDevicePaths []string) bool {
 			break
 		}
 	}
-
 	return exist
 }
 
 // GetConnectionDevices get volumes in paths
 func GetConnectionDevices(targets []Target) ([]string, error) {
 	var devices []string
-
 	sessions, err := GetSessions()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get iSCSI sessions: %w", err)
 	}
-
 	for _, target := range targets {
 		for _, session := range sessions {
 			if session.TargetPortal != target.Portal || session.IQN != target.Iqn {
 				continue
 			}
-
 			hctl, err := GetHctl(session.SessionID, target.Lun)
 			if err != nil {
 				return nil, fmt.Errorf("failed to get hctl info: %w", err)
@@ -213,7 +166,6 @@ func GetConnectionDevices(targets []Target) ([]string, error) {
 			}
 		}
 	}
-
 	return devices, nil
 }
 
@@ -290,5 +242,24 @@ func removeScsiSymlinks(devicePaths []string) error {
 		}
 	}
 
+	return nil
+}
+
+//disconnectFromIscsiPortal login iscsi partal
+func disconnectFromIscsiPortal(portal string, iqn string) error {
+	_, err := utils.UpdateIscsiadm(portal, iqn, "node.startup", "manual", nil)
+	if err != nil {
+		return fmt.Errorf("failed to update node.startup to manual: %w", err)
+	}
+	_, err = utils.ExecIscsiadm(portal, iqn, []string{"--logout"})
+	if err != nil {
+		logger.Error("Exec iscsiadm login command failed", err)
+		return err
+	}
+	_, err = utils.ExecIscsiadm(portal, iqn, []string{"--op", "delete"})
+	if err != nil {
+		return fmt.Errorf("failed to execute --op delete: %w", err)
+	}
+	logger.Info("iscsiadm portal %s logout success", portal)
 	return nil
 }
