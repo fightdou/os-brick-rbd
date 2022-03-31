@@ -10,6 +10,7 @@ import (
 	"github.com/wonderivan/logger"
 )
 
+var RetryCount int = 10
 // ConnISCSI contains iscsi volume info
 type ConnISCSI struct {
 	targetDiscovered bool
@@ -142,7 +143,7 @@ func (c *ConnISCSI) connectMultiPathVolume() (string, error) {
 	var devices []string
 	for _, p := range target {
 		wg.Add(1)
-		device, err := iscsi.ConVolume(p.Portal, p.Iqn, p.Lun)
+		device, err := c.connVolume(p.Portal, p.Iqn, p.Lun)
 		if err != nil {
 			logger.Error("Failed to connect volume", err)
 			return "", err
@@ -169,7 +170,7 @@ func (c *ConnISCSI) connectMultiPathVolume() (string, error) {
 func (c *ConnISCSI) connectSinglePathVolume() (string, error) {
 	target := c.getAllTargets()
 	p := target[0]
-	device, err := iscsi.ConVolume(p.Portal, p.Iqn, c.targetLun)
+	device, err := c.connVolume(p.Portal, p.Iqn, p.Lun)
 	if err != nil {
 		logger.Error("Request connect iscsi volume failed", err)
 		return "", err
@@ -202,4 +203,72 @@ func (c *ConnISCSI) getAllTargets() []iscsi.Target {
 	ips := iscsi.NewTarget(c.targetPortal, c.targetIqn, c.targetLun)
 	allTarget = append(allTarget, ips)
 	return allTarget
+}
+
+func (c *ConnISCSI) connVolume (portal string, iqn string, lun int) (string, error) {
+	sessionId, err := c.connectToIscsiPortal(portal, iqn)
+	if err != nil {
+		return "", err
+	}
+	hctl, err := iscsi.GetHctl(sessionId, lun)
+	if err != nil {
+		return "", err
+	}
+	if err := iscsi.ScanISCSI(hctl); err != nil {
+		return "", fmt.Errorf("failed to rescan target: %w", err)
+	}
+	device, err := iscsi.GetDeviceName(sessionId, hctl)
+	if err != nil {
+		return "", fmt.Errorf("failed to get device name: %w", err)
+	}
+	return device, nil
+}
+
+func  (c *ConnISCSI) connectToIscsiPortal (portal string, iqn string) (int, error) {
+	var err error
+	if err := c.loginPortal(portal, iqn); err != nil {
+		logger.Error("Iscsi login portal failed", err)
+		return -1, err
+	}
+	for i := 0; i < RetryCount; i++ {
+		sessions, err := iscsi.GetSessions()
+		if err != nil {
+			logger.Error("Get iscsi session failed", err)
+			return 0, err
+		}
+		for _, session := range sessions {
+			if session.TargetPortal == portal && session.IQN == iqn {
+				return session.SessionID, nil
+			}
+		}
+	}
+	return -1, err
+}
+
+//LoginPortal login iscsi partal
+func (c *ConnISCSI) loginPortal (portal string, iqn string) error {
+	_, err := utils.UpdateIscsiadm(portal, iqn, "node.session.scan", "manual", nil)
+	if err != nil {
+		logger.Error("Exec iscsiadm update node.session.scan manual failed", err)
+		return err
+	}
+
+	if c.authMethod == "CHAP" {
+		_, _ = utils.UpdateIscsiadm(portal, iqn, "node.session.auth.authmethod", c.authMethod, nil)
+		_, _ = utils.UpdateIscsiadm(portal, iqn, "node.session.auth.username", c.authUsername, nil)
+		_, _ = utils.UpdateIscsiadm(portal, iqn, "node.session.auth.password", c.authPassword, nil)
+	}
+
+	_, err = utils.ExecIscsiadm(portal, iqn, []string{"--login"})
+	if err != nil {
+		logger.Error("Exec iscsiadm login command failed", err)
+		return err
+	}
+	_, err = utils.UpdateIscsiadm(portal, iqn, "node.startup", "automatic", nil)
+	if err != nil {
+		logger.Error("Exec iscsiadm update command failed", err)
+		return err
+	}
+	logger.Info("iscsiadm portal %s login success", portal)
+	return nil
 }
