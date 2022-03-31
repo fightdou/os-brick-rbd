@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/fightdou/os-brick-rbd/iscsi"
+	"github.com/fightdou/os-brick-rbd/local"
 	"github.com/fightdou/os-brick-rbd/rbd"
 )
 
@@ -22,6 +23,8 @@ func NewConnector(protocol string, connInfo map[string]interface{}) ConnProperti
 		// Only supported local attach volume
 		connInfo["do_local_attach"] = true
 		return rbd.NewRBDConnector(connInfo)
+	case "Local":
+		return local.NewLocalConnector(connInfo)
 	case "ISCSI":
 		return iscsi.NewISCSIConnector(connInfo)
 	}
