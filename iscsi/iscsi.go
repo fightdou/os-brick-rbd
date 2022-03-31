@@ -10,6 +10,8 @@ import (
 	"github.com/wonderivan/logger"
 )
 
+var RetryCount int = 10
+
 // ConnISCSI contains iscsi volume info
 type ConnISCSI struct {
 	targetDiscovered bool
@@ -95,45 +97,6 @@ func (c *ConnISCSI) GetDevicePath() string {
 	return devicePath
 }
 
-//cleanupConnection Cleans up connection flushing and removing devices and multipath
-func (c *ConnISCSI) cleanupConnection() error {
-	target := c.getAllTargets()
-	deviceMap, err := iscsi.GetConnectionDevices(target)
-	if err != nil {
-		logger.Error("Get iscsi connection device failed", err)
-		return err
-	}
-	var devicePaths []string
-	for _, dn := range deviceMap {
-		devicePaths = append(deviceMap, "/dev/"+dn)
-	}
-	isMultiPath := false
-	if len(devicePaths) > 1 {
-		isMultiPath = true
-	}
-
-	rErr := iscsi.RemoveConnection(deviceMap, isMultiPath)
-	if rErr != nil {
-		logger.Error("Remove iscsi connection failed", rErr)
-		return rErr
-	}
-	attachedDevices, err := iscsi.GetAttachedSCSIDevices()
-	if err != nil {
-		logger.Error("failed to get attached devices", err)
-		return err
-	}
-
-	if len(attachedDevices) == 0 {
-		// call logout when No action session
-		if err := iscsi.DisconnectConnection(target); err != nil {
-			logger.Error("failed to disconnet iSCSI connection", err)
-			return err
-		}
-	}
-	logger.Info("Cleanup iscsi connection success!")
-	return nil
-}
-
 //connectMultiPathVolume Connect to a multipathed volume launching parallel login requests
 func (c *ConnISCSI) connectMultiPathVolume() (string, error) {
 	var err error
@@ -142,7 +105,7 @@ func (c *ConnISCSI) connectMultiPathVolume() (string, error) {
 	var devices []string
 	for _, p := range target {
 		wg.Add(1)
-		device, err := iscsi.ConVolume(p.Portal, p.Iqn, p.Lun)
+		device, err := c.connVolume(p.Portal, p.Iqn, p.Lun)
 		if err != nil {
 			logger.Error("Failed to connect volume", err)
 			return "", err
@@ -167,18 +130,20 @@ func (c *ConnISCSI) connectMultiPathVolume() (string, error) {
 
 //connectSinglePathVolume Connect to a volume using a single path.
 func (c *ConnISCSI) connectSinglePathVolume() (string, error) {
+	var device string
+	var err error
 	target := c.getAllTargets()
-	p := target[0]
-	device, err := iscsi.ConVolume(p.Portal, p.Iqn, c.targetLun)
-	if err != nil {
-		logger.Error("Request connect iscsi volume failed", err)
-		return "", err
+	for i := range target {
+		device, err = c.connVolume(target[i].Portal, target[i].Iqn, target[i].Lun)
+		if err != nil {
+			logger.Error("Request connect iscsi singlepath volume failed", err)
+			return "", err
+		}
 	}
-	logger.Info("Connect iscsi %s volume success", device)
 	return filepath.Join("/dev/", device), nil
 }
 
-//getIpsIqnsLuns Build a list of ips, iqns, and luns
+//getIpsIqnsLuns Build a list of ips, iqns, and luns, use iSCSI discovery to get the information
 func (c *ConnISCSI) getIpsIqnsLuns() []iscsi.Target {
 	if c.targetPortals != nil && c.targetIqns != nil {
 		ipsIqnsLuns := c.getAllTargets()
@@ -202,4 +167,128 @@ func (c *ConnISCSI) getAllTargets() []iscsi.Target {
 	ips := iscsi.NewTarget(c.targetPortal, c.targetIqn, c.targetLun)
 	allTarget = append(allTarget, ips)
 	return allTarget
+}
+
+//connVolume Make a connection to a volume, send scans and wait for the device.
+func (c *ConnISCSI) connVolume(portal string, iqn string, lun int) (string, error) {
+	sessionId, err := c.connectToIscsiPortal(portal, iqn)
+	if err != nil {
+		logger.Error("Failed get iscsi session failed", err)
+		return "", err
+	}
+	hctl, err := iscsi.GetHctl(sessionId, lun)
+	if err != nil {
+		logger.Error("Failed get volume hctl ", err)
+		return "", err
+	}
+	if err := iscsi.ScanISCSI(hctl); err != nil {
+		logger.Error("Failed to rescan target", err)
+		return "", err
+	}
+	device, err := iscsi.GetDeviceName(sessionId, hctl)
+	if err != nil {
+		logger.Error("Failed to get device name", err)
+		return "", err
+	}
+	logger.Debug("Connect volume [portal %s, iqn %s] success", portal, iqn)
+	return device, nil
+}
+
+//connectToIscsiPortal Connect to iSCSI portal-target and return the session id
+func (c *ConnISCSI) connectToIscsiPortal(portal string, iqn string) (int, error) {
+	var err error
+	if err := c.loginPortal(portal, iqn); err != nil {
+		logger.Error("Iscsi login portal failed", err)
+		return -1, err
+	}
+	for i := 0; i < RetryCount; i++ {
+		sessions, err := iscsi.GetSessions()
+		if err != nil {
+			logger.Error("Get iscsi session failed", err)
+			return 0, err
+		}
+		for _, session := range sessions {
+			if session.TargetPortal == portal && session.IQN == iqn {
+				return session.SessionID, nil
+			}
+		}
+	}
+	return -1, err
+}
+
+//loginPortal login iscsi partal
+func (c *ConnISCSI) loginPortal(portal string, iqn string) error {
+	var err error
+	_, err = utils.ExecIscsiadm(portal, iqn, []string{})
+	if err != nil {
+		_, err := utils.ExecIscsiadm(portal, iqn, []string{"--interface", "default", "--op", "new"})
+		if err != nil {
+			logger.Error("Encountered database failure for %s", portal)
+		}
+	}
+
+	_, err = utils.UpdateIscsiadm(portal, iqn, "node.session.scan", "manual", nil)
+	if err != nil {
+		logger.Error("Exec iscsiadm update node.session.scan manual failed", err)
+		return err
+	}
+
+	if c.authMethod == "CHAP" {
+		_, _ = utils.UpdateIscsiadm(portal, iqn, "node.session.auth.authmethod", c.authMethod, nil)
+		_, _ = utils.UpdateIscsiadm(portal, iqn, "node.session.auth.username", c.authUsername, nil)
+		_, _ = utils.UpdateIscsiadm(portal, iqn, "node.session.auth.password", c.authPassword, nil)
+	}
+
+	_, err = utils.ExecIscsiadm(portal, iqn, []string{"--login"})
+	if err != nil {
+		logger.Error("Exec iscsiadm login %s %s command failed", portal, iqn, err)
+		return err
+	}
+
+	_, err = utils.ExecIscsiadm(portal, iqn, []string{"--rescan"})
+	if err != nil {
+		logger.Error("Exec iscsiadm rescan %s %s command failed", portal, iqn, err)
+		return err
+	}
+
+	_, err = utils.UpdateIscsiadm(portal, iqn, "node.startup", "automatic", nil)
+	if err != nil {
+		logger.Error("Exec iscsiadm update command failed", err)
+		return err
+	}
+	logger.Debug("iscsiadm portal %s login success", portal)
+	return nil
+}
+
+//cleanupConnection Cleans up connection flushing and removing devices and multipath
+func (c *ConnISCSI) cleanupConnection() error {
+	var err error
+	target := c.getAllTargets()
+	deviceMap, err := iscsi.GetConnectionDevices(target)
+	if err != nil {
+		logger.Error("Get iscsi connection device failed", err)
+		return err
+	}
+	var diskNames []string
+	for _, dName := range deviceMap {
+		name := "/dev/" + dName
+		diskNames = append(diskNames, name)
+	}
+	isMultiPath := false
+	if len(diskNames) > 1 {
+		isMultiPath = true
+	}
+
+	err = iscsi.RemoveConnection(diskNames, isMultiPath)
+	if err != nil {
+		logger.Error("Remove iscsi connection failed", err)
+		return err
+	}
+
+	if err = iscsi.DisconnectConnection(target); err != nil {
+		logger.Error("failed to disconnet iSCSI connection", err)
+		return err
+	}
+	logger.Info("Cleanup iscsi connection success!")
+	return nil
 }

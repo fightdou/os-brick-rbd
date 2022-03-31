@@ -2,13 +2,14 @@ package iscsi
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/fightdou/os-brick-rbd/pkg/utils"
+	"github.com/wonderivan/logger"
 )
 
+//Target a iscsi connection info
 type Target struct {
 	Portal string
 	Iqn    string
@@ -23,6 +24,7 @@ func DiscoverIscsiPortals(portal string, iqn string, luns int) []Target {
 	args := []string{"-m", "discovery", "-t", "sendtargets", "-p", portal}
 	out, err := utils.Execute("iscsiadm", args...)
 	if err != nil {
+		logger.Error("Exec iscsiadm discovery command failed", err)
 		return nil
 	}
 	entries := strings.Split(out, "\n")
@@ -44,6 +46,7 @@ func DiscoverIscsiPortals(portal string, iqn string, luns int) []Target {
 	return target
 }
 
+//NewTarget Build a target object include portal, iqn, lun
 func NewTarget(portals string, iqns string, luns int) Target {
 	p := Target{
 		Portal: portals,
@@ -58,45 +61,25 @@ func FindSysfsMultipathDM(deviceName string) (dmDeviceName string, err error) {
 	globStr := fmt.Sprintf("/sys/block/%s/holders/dm-*", deviceName)
 	paths, err := filepath.Glob(globStr)
 	if err != nil {
-		return "", fmt.Errorf("failed to glob dm device filepath: %w", err)
+		logger.Error("failed to glob dm device filepath", err)
+		return "", err
 	}
 	if len(paths) == 0 {
-		return "", fmt.Errorf("dm device is not found")
+		logger.Error("dm device is not found", err)
+		return "", err
 	}
 
 	_, name := filepath.Split(paths[0])
 	return name, nil
 }
 
-func DisconnectConnection(targets []Target) error {
-	for _, p := range targets {
-		err := disconnectFromIscsiPortal(p.Portal, p.Iqn)
-		if err != nil {
-			return fmt.Errorf("failed to disconnect from iSCSI portal: %w", err)
-		}
-	}
-	return nil
-}
-
+//flushMultipathDevice Flush dm device
 func flushMultipathDevice(targetMultipathPath string) error {
 	args := []string{"-f", targetMultipathPath}
 	_, err := utils.Execute("multipath", args...)
 	if err != nil {
-		return fmt.Errorf("failed to execute multipath device flush command: %w", err)
+		logger.Error("failed to execute multipath device flush command", err)
+		return err
 	}
-
-	return nil
-}
-
-func flushDeviceIO(devicePath string) error {
-	_, err := os.Stat(devicePath)
-	if err != nil {
-		return fmt.Errorf("failed to stat device path: %w", err)
-	}
-	args := []string{"--flushbufs", devicePath}
-	if _, err := utils.Execute("blockdev", args...); err != nil {
-		return fmt.Errorf("failed to execute blockdev command: %s", err)
-	}
-
 	return nil
 }

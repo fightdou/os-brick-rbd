@@ -1,7 +1,6 @@
 package iscsi
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -12,8 +11,6 @@ import (
 	"github.com/fightdou/os-brick-rbd/pkg/utils"
 	"github.com/wonderivan/logger"
 )
-
-var RetryCount int = 10
 
 // Hctl is IDs of SCSI
 type Hctl struct {
@@ -38,47 +35,46 @@ func GetHctl(id int, lun int) (*Hctl, error) {
 	_, fileName := filepath.Split(paths[0])
 	ids := strings.Split(fileName, ":")
 	if len(ids) != 3 {
-		return nil, fmt.Errorf("failed to parse iSCSI session filename")
+		logger.Error("failed to parse iSCSI session filename", err)
+		return nil, err
 	}
 	channelID, err := strconv.Atoi(ids[1])
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse channel ID: %w", err)
+		logger.Error("failed to parse channel ID", err)
+		return nil, err
 	}
 	targetID, err := strconv.Atoi(ids[2])
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse target ID: %w", err)
+		logger.Error("failed to parse target ID", err)
+		return nil, err
 	}
-
 	names := strings.Split(paths[0], "/")
 	hostIDstr := strings.TrimPrefix(searchHost(names), "host")
 	hostID, err := strconv.Atoi(hostIDstr)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse host ID: %w", err)
+		logger.Error("failed to parse host ID", err)
+		return nil, err
 	}
-
 	hctl := &Hctl{
 		HostID:    hostID,
 		ChannelID: channelID,
 		TargetID:  targetID,
 		HostLUNID: lun,
 	}
-
 	return hctl, nil
 }
 
 //searchHost search param
-// return "host"+id
 func searchHost(names []string) string {
 	for _, v := range names {
 		if strings.HasPrefix(v, "host") {
 			return v
 		}
 	}
-
 	return ""
 }
 
-//ScanISCSI
+//ScanISCSI Send an iSCSI scan request given the host and optionally the ctl
 func ScanISCSI(hctl *Hctl) error {
 	path := fmt.Sprintf("/sys/class/scsi_host/host%d/scan", hctl.HostID)
 	content := fmt.Sprintf("%d %d %d",
@@ -89,90 +85,77 @@ func ScanISCSI(hctl *Hctl) error {
 	return utils.EchoScsiCommand(path, content)
 }
 
-func ConVolume(portal string, iqn string, lun int) (string, error) {
-	sessionId, err := connectToIscsiPortal(portal, iqn)
-	if err != nil {
-		return "", err
+//GetDeviceName Add retry to get device name
+func GetDeviceName(sessionID int, hctl *Hctl) (string, error) {
+	var lastErr error
+	for i := 0; i < 10; i++ {
+		// retry 10 times
+		deviceName, err := getDeviceName(sessionID, hctl)
+		if err == nil {
+			return deviceName, nil
+		}
+		logger.Debug("failed to get device name (sessionID: %d, hctl: %+v), do retry: %+v", sessionID, hctl, err)
+		lastErr = err
+
+		if err := ScanISCSI(hctl); err != nil {
+			logger.Error("failed to scan iSCSI", err)
+			return "", err
+		}
+
+		time.Sleep(1 * time.Second)
 	}
-	hctl, err := GetHctl(sessionId, lun)
-	if err != nil {
-		return "", err
-	}
-	if err := ScanISCSI(hctl); err != nil {
-		return "", fmt.Errorf("failed to rescan target: %w", err)
-	}
-	device, err := GetDeviceName(sessionId, hctl)
-	if err != nil {
-		return "", fmt.Errorf("failed to get device name: %w", err)
-	}
-	return device, nil
+	return "", lastErr
 }
 
-func GetDeviceName(id int, hctl *Hctl) (string, error) {
+//getDeviceName Get device on /sys/class/scsi_host dir name
+func getDeviceName(sessionID int, hctl *Hctl) (string, error) {
 	p := fmt.Sprintf(
 		"/sys/class/iscsi_host/host%d/device/session%d/target%d:%d:%d/%d:%d:%d:%d/block/*",
 		hctl.HostID,
-		id,
+		sessionID,
 		hctl.HostID, hctl.ChannelID, hctl.TargetID,
 		hctl.HostID, hctl.ChannelID, hctl.TargetID, hctl.HostLUNID)
 
 	paths, err := filepath.Glob(p)
 	if err != nil {
-		return "", fmt.Errorf("failed to parse iSCSI block device filepath: %w", err)
+		logger.Error("failed to parse iSCSI block device filepath", err)
+		return "", err
 	}
 	if len(paths) == 0 {
-		return "", fmt.Errorf("device filepath is not found")
+		logger.Error("device filepath is not found", err)
+		return "", err
 	}
-
 	_, deviceName := filepath.Split(paths[0])
-
 	return deviceName, nil
 }
 
-func connectToIscsiPortal(portal string, iqn string) (int, error) {
-	if err := LoginPortal(portal, iqn); err != nil {
-		logger.Error("Iscsi login portal failed", err)
-		return 0, err
-	}
-	for i := 0; i < RetryCount; i++ {
-		sessions, err := GetSessions()
-		if err != nil {
-			logger.Error("Get iscsi session failed", err)
-			return 0, err
-		}
-		for _, session := range sessions {
-			if session.TargetPortal == portal && session.IQN == iqn {
-				return session.SessionID, nil
-			}
-		}
-	}
-	return -1, errors.New("session id not found")
-}
-
+//removeScsiDevice Removes a scsi device based upon /dev/sdX name
 func removeScsiDevice(devicePath string) error {
 	deviceName := strings.TrimPrefix(devicePath, "/dev/")
 	deletePath := fmt.Sprintf("/sys/block/%s/device/delete", deviceName)
 	_, err := os.Stat(deletePath)
 	if err != nil {
-		return fmt.Errorf("failed to stat device delete path: %w", err)
+		logger.Error("failed to stat device delete path", err)
+		return err
 	}
 
 	err = flushDeviceIO(devicePath)
 	if err != nil {
-		return fmt.Errorf("failed to flush device I/O: %w", err)
+		logger.Error("failed to flush device I/O", err)
+		return err
 	}
 
 	err = utils.EchoScsiCommand(deletePath, "1")
 	if err != nil {
-		return fmt.Errorf("failed to write to delete path: %w", err)
+		logger.Error("failed to write to delete path", err)
+		return err
 	}
-
 	return nil
 }
 
+//waitForVolumesRemoval Wait for device paths to be removed from the system
 func waitForVolumesRemoval(targetDevicePaths []string) bool {
 	exist := false
-
 	for _, devicePath := range targetDevicePaths {
 		_, err := os.Stat(devicePath)
 		if err == nil {
@@ -181,44 +164,44 @@ func waitForVolumesRemoval(targetDevicePaths []string) bool {
 			break
 		}
 	}
-
 	return exist
 }
 
 // GetConnectionDevices get volumes in paths
 func GetConnectionDevices(targets []Target) ([]string, error) {
 	var devices []string
-
 	sessions, err := GetSessions()
 	if err != nil {
-		return nil, fmt.Errorf("failed to get iSCSI sessions: %w", err)
+		logger.Error("failed to get iSCSI sessions", err)
+		return nil, err
 	}
-
 	for _, target := range targets {
 		for _, session := range sessions {
 			if session.TargetPortal != target.Portal || session.IQN != target.Iqn {
 				continue
 			}
-
 			hctl, err := GetHctl(session.SessionID, target.Lun)
 			if err != nil {
-				return nil, fmt.Errorf("failed to get hctl info: %w", err)
+				logger.Error("failed to get hctl info", err)
+				return nil, err
 			}
 			deviceName, err := GetDeviceName(session.SessionID, hctl)
 			if err != nil {
-				return nil, fmt.Errorf("failed to get device name: %w", err)
+				logger.Error("failed to get device name", err)
+				return nil, err
 			}
 			if hctl.HostLUNID == target.Lun {
 				devices = append(devices, deviceName)
 			}
 		}
 	}
-
 	return devices, nil
 }
 
+//RemoveConnection Remove LUNs and multipath associated with devices names
 func RemoveConnection(targetDeviceNames []string, isMultiPath bool) error {
 	var devicePaths []string
+	var err error
 	for _, dn := range targetDeviceNames {
 		devicePaths = append(devicePaths, "/dev/"+dn)
 	}
@@ -236,14 +219,12 @@ func RemoveConnection(targetDeviceNames []string, isMultiPath bool) error {
 			logger.Error("Flush %s failed", multiPathDevicePath)
 		}
 	}
-
 	for _, devicePath := range devicePaths {
 		err := removeScsiDevice(devicePath)
 		if err != nil {
-			return fmt.Errorf("failed to remove iSCSI device: %w", err)
+			return fmt.Errorf("timeout exceeded wait for volume removal")
 		}
 	}
-
 	timeoutSecond := 10
 	for i := 0; waitForVolumesRemoval(targetDeviceNames); i++ {
 		// until exist target volume.
@@ -251,28 +232,30 @@ func RemoveConnection(targetDeviceNames []string, isMultiPath bool) error {
 		time.Sleep(1 * time.Second)
 
 		if i == timeoutSecond {
-			return fmt.Errorf("timeout exceeded wait for volume removal")
+			logger.Error("timeout exceeded wait for volume removal")
+			return err
 		}
 	}
-
-	err := removeScsiSymlinks(devicePaths)
+	err = removeScsiSymlinks(devicePaths)
 	if err != nil {
-		return fmt.Errorf("failed to remove scsi symlinks: %w", err)
+		logger.Error("failed to remove scsi symlinks", err)
+		return err
 	}
 	return nil
 }
 
+//removeScsiSymlinks Remove iscsi device link path
 func removeScsiSymlinks(devicePaths []string) error {
 	links, err := filepath.Glob("/dev/disk/by-id/scsi-*")
 	if err != nil {
-		return fmt.Errorf("failed to get scsi link")
+		logger.Error("failed to get scsi link", err)
+		return err
 	}
-
 	var removeTarget []string
 	for _, link := range links {
 		realpath, err := filepath.EvalSymlinks(link)
 		if err != nil {
-			logger.Info("failed to get realpath: %v", err)
+			logger.Error("failed to get realpath: %v", err)
 		}
 
 		for _, devicePath := range devicePaths {
@@ -282,13 +265,60 @@ func removeScsiSymlinks(devicePaths []string) error {
 			}
 		}
 	}
-
 	for _, l := range removeTarget {
 		err = os.Remove(l)
 		if err != nil {
-			return fmt.Errorf("failed to delete symlink: %w", err)
+			logger.Error("failed to delete symlink", err)
+			return err
 		}
 	}
+	return nil
+}
 
+//DisconnectConnection Close iscsi connection
+func DisconnectConnection(targets []Target) error {
+	for _, p := range targets {
+		err := disconnectFromIscsiPortal(p.Portal, p.Iqn)
+		if err != nil {
+			logger.Error("failed to disconnect from iSCSI portal", err)
+			return err
+		}
+	}
+	return nil
+}
+
+//disconnectFromIscsiPortal logout iscsi partal
+func disconnectFromIscsiPortal(portal string, iqn string) error {
+	_, err := utils.UpdateIscsiadm(portal, iqn, "node.startup", "manual", nil)
+	if err != nil {
+		logger.Error("failed to update node.startup to manual", err)
+		return err
+	}
+	_, err = utils.ExecIscsiadm(portal, iqn, []string{"--logout"})
+	if err != nil {
+		logger.Error("Exec iscsiadm logout command failed", err)
+		return err
+	}
+	_, err = utils.ExecIscsiadm(portal, iqn, []string{"--op", "delete"})
+	if err != nil {
+		logger.Error("failed to execute --op delete", err)
+		return err
+	}
+	logger.Debug("iscsiadm portal %s logout success", portal)
+	return nil
+}
+
+//flushDeviceIO This is used to flush any remaining IO in the buffers
+func flushDeviceIO(devicePath string) error {
+	_, err := os.Stat(devicePath)
+	if err != nil {
+		logger.Error("failed to stat device path", err)
+		return err
+	}
+	args := []string{"--flushbufs", devicePath}
+	if _, err := utils.Execute("blockdev", args...); err != nil {
+		logger.Error("failed to execute blockdev command", err)
+		return err
+	}
 	return nil
 }
