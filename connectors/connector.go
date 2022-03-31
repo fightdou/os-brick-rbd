@@ -23,7 +23,7 @@ func NewConnector(protocol string, connInfo map[string]interface{}) ConnProperti
 		// Only supported local attach volume
 		connInfo["do_local_attach"] = true
 		return rbd.NewRBDConnector(connInfo)
-	case "Local":
+	case "LOCAL":
 		return local.NewLocalConnector(connInfo)
 	case "ISCSI":
 		return iscsi.NewISCSIConnector(connInfo)
