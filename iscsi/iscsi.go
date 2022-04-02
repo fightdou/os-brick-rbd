@@ -224,6 +224,7 @@ func (c *ConnISCSI) loginPortal(portal string, iqn string) error {
 		_, err := utils.ExecIscsiadm(portal, iqn, []string{"--interface", "default", "--op", "new"})
 		if err != nil {
 			logger.Error("Encountered database failure for %s", portal)
+			return err
 		}
 	}
 
@@ -269,17 +270,13 @@ func (c *ConnISCSI) cleanupConnection() error {
 		logger.Error("Get iscsi connection device failed", err)
 		return err
 	}
-	var diskNames []string
-	for _, dName := range deviceMap {
-		name := "/dev/" + dName
-		diskNames = append(diskNames, name)
-	}
+
 	isMultiPath := false
-	if len(diskNames) > 1 {
+	if len(deviceMap) > 1 {
 		isMultiPath = true
 	}
 
-	err = iscsi.RemoveConnection(diskNames, isMultiPath)
+	err = iscsi.RemoveConnection(deviceMap, isMultiPath)
 	if err != nil {
 		logger.Error("Remove iscsi connection failed", err)
 		return err
