@@ -65,8 +65,7 @@ func FindSysfsMultipathDM(deviceName string) (dmDeviceName string, err error) {
 		return "", err
 	}
 	if len(paths) == 0 {
-		logger.Error("dm device is not found", err)
-		return "", err
+		return "", fmt.Errorf("dm device is not found")
 	}
 
 	_, name := filepath.Split(paths[0])

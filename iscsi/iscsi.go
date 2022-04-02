@@ -219,18 +219,10 @@ func (c *ConnISCSI) connectToIscsiPortal(portal string, iqn string) (int, error)
 //loginPortal login iscsi partal
 func (c *ConnISCSI) loginPortal(portal string, iqn string) error {
 	var err error
-	_, err = utils.ExecIscsiadm(portal, iqn, []string{})
+	args := []string{"-m", "discovery", "-t", "sendtargets", "-p", portal}
+	_, err = utils.Execute("iscsiadm", args...)
 	if err != nil {
-		_, err := utils.ExecIscsiadm(portal, iqn, []string{"--interface", "default", "--op", "new"})
-		if err != nil {
-			logger.Error("Encountered database failure for %s", portal)
-			return err
-		}
-	}
-
-	_, err = utils.UpdateIscsiadm(portal, iqn, "node.session.scan", "manual", nil)
-	if err != nil {
-		logger.Error("Exec iscsiadm update node.session.scan manual failed", err)
+		logger.Error("Exec iscsiadm discovery %s %s command failed", portal, iqn, err)
 		return err
 	}
 
@@ -243,12 +235,6 @@ func (c *ConnISCSI) loginPortal(portal string, iqn string) error {
 	_, err = utils.ExecIscsiadm(portal, iqn, []string{"--login"})
 	if err != nil {
 		logger.Error("Exec iscsiadm login %s %s command failed", portal, iqn, err)
-		return err
-	}
-
-	_, err = utils.ExecIscsiadm(portal, iqn, []string{"--rescan"})
-	if err != nil {
-		logger.Error("Exec iscsiadm rescan %s %s command failed", portal, iqn, err)
 		return err
 	}
 

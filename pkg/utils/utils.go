@@ -29,6 +29,7 @@ func ExecIscsiadm(portalIP string, iqn string, args []string) (string, error) {
 		logger.Error("failed to execute iscsiadm command", err)
 		return "", err
 	}
+	logger.Debug("Exec iscsiadm command -m node -T %s -p %s args %s Success", iqn, portalIP, args)
 	return out, nil
 }
 
@@ -77,9 +78,11 @@ func ToBool(i interface{}) bool {
 
 func ToInt(i interface{}) int {
 	var res int
-	switch e := i.(type) {
+	switch i.(type) {
 	case int:
-		res = e
+		res = i.(int)
+	case string:
+		res, _ = strconv.Atoi(i.(string))
 	}
 	return res
 }
@@ -88,7 +91,7 @@ func ToIntSlice(i interface{}) []int {
 	resSlice := i.([]interface{})
 	result := make([]int, len(resSlice))
 	for i, v := range resSlice {
-		result[i] = v.(int)
+		result[i] = ToInt(v)
 	}
 	return result
 }

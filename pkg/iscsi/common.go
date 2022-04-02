@@ -122,8 +122,7 @@ func getDeviceName(sessionID int, hctl *Hctl) (string, error) {
 		return "", err
 	}
 	if len(paths) == 0 {
-		logger.Error("device filepath is not found", err)
-		return "", err
+		return "", fmt.Errorf("device filepath is not found")
 	}
 	_, deviceName := filepath.Split(paths[0])
 	return deviceName, nil
