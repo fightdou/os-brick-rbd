@@ -29,6 +29,7 @@ func ExecIscsiadm(portalIP string, iqn string, args []string) (string, error) {
 		logger.Error("failed to execute iscsiadm command", err)
 		return "", err
 	}
+	logger.Debug("Exec iscsiadm command -m node -T %s -p %s args %s Success", iqn, portalIP, args)
 	return out, nil
 }
 
