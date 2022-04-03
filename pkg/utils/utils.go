@@ -77,18 +77,23 @@ func ToBool(i interface{}) bool {
 }
 
 func ToInt(i interface{}) int {
-	var res int
-	switch i.(type) {
+	switch res := i.(type) {
 	case int:
-		res = i.(int)
+		return res
 	case string:
-		res, _ = strconv.Atoi(i.(string))
+		result, err := strconv.Atoi(res)
+		if err != nil {
+			return -1
+		}
+		return result
 	case float64:
-		res = int(i.(float64))
+		result := int(res)
+		return result
 	case float32:
-		res = int(i.(float32))
+		result := int(res)
+		return result
 	}
-	return res
+	return -1
 }
 
 func ToIntSlice(i interface{}) []int {
