@@ -83,6 +83,10 @@ func ToInt(i interface{}) int {
 		res = i.(int)
 	case string:
 		res, _ = strconv.Atoi(i.(string))
+	case float64:
+		res = int(i.(float64))
+	case float32:
+		res = int(i.(float32))
 	}
 	return res
 }
