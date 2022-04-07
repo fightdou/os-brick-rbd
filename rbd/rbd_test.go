@@ -74,6 +74,7 @@ func TestConnectVolume(t *testing.T) {
 	}
 	expected_cmds := []string{
 		"which rbd",
+		"rbd showmapped --format=json --id fake_user",
 		fmt.Sprintf("rbd map %s --pool %s --id %s --mon_host %s:%s,%s:%s", fakeVolume, fakePool, fakeUser, fakeHost1, fakePort1, fakeHost2, fakePort2),
 	}
 	if !reflect.DeepEqual(expected_cmds, callRecords) {
@@ -106,7 +107,7 @@ func TestGetDevicePath(t *testing.T) {
 		utilsExecute = utils.Execute
 		callRecords = []string{}
 	}()
-	expected_path := fmt.Sprintf("/dev/rbd/%s/%s", fakePool, fakeVolume)
+	expected_path := fakeDevice
 	path := rbdConnector.GetDevicePath()
 	if path != expected_path {
 		t.Errorf("\nExpected path:\n%s\nActula path:\n%s", expected_path, path)
